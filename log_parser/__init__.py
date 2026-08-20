@@ -1,11 +1,11 @@
-"""Compatibility package that exposes the src/log_parser implementation."""
+"""Compatibility package that exposes the src/sentinellogs implementation."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 _repo_root = Path(__file__).resolve().parent.parent
-_src_pkg = _repo_root / "src" / "log_parser"
+_src_pkg = _repo_root / "src" / "sentinellogs"
 if str(_src_pkg) not in __path__:
     __path__.append(str(_src_pkg))
 

@@ -1,2 +1,0 @@
-[console_scripts]
-log-parser = log_parser.cli:main

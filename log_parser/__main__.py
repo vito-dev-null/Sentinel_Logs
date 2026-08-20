@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from log_parser.cli import main
+from sentinellogs.cli import main
 
 
 if __name__ == "__main__":
