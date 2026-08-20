@@ -143,7 +143,7 @@ def _build_sink_specs(args: argparse.Namespace) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Log parser in tempo reale con output JSONL")
+    parser = argparse.ArgumentParser(description="SentinelLogs - real-time log parser in tempo reale con output JSONL")
     parser.add_argument("--file", nargs="+", help="Path del file di log da monitorare, anche con wildcard")
     parser.add_argument("--confirm-demo", action="store_true", help="Conferma esplicita per usare file che sembrano demo/sample (se usato, l'app accetta file d'esempio)")
     parser.add_argument("--output", help="Path del file JSONL dove salvare l'output (opzionale)")

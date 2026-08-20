@@ -1,4 +1,4 @@
-"""log_parser package."""
+"""SentinelLogs package (was log_parser)."""
 
 from .cli import main
 from .metrics import MetricsRegistry

@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "log-parser"
+name = "sentinellogs"
 version = "0.1.0"
-description = "Real-time log parser with regex-based extraction and JSONL output"
+description = "SentinelLogs: real-time log parser with regex-based extraction and JSONL output"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-log-parser = "log_parser.cli:main"
+sentinellogs = "log_parser.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

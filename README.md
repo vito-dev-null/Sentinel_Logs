@@ -1,4 +1,4 @@
-# log-parser
+# SentinelLogs
 
 `log-parser` is a real-time log parser designed for tail-like monitoring, regex extraction, JSONL output, and integration with alerting and SIEM pipelines.
 
