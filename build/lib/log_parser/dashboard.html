@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>log-parser dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.5.1/chart.umd.min.js"></script>
+    <style>
+      :root {
+        --bg: #f5f5f4;
+        --panel: #ffffff;
+        --border: #d6d3d1;
+        --text: #1c1917;
+        --muted: #57534e;
+        --success: #166534;
+        --success-bg: #dcfce7;
+        --error: #991b1b;
+        --error-bg: #fee2e2;
+        --accent: #1f2937;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .title {
+        font-size: 1.6rem;
+        font-weight: 600;
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: var(--panel);
+        font-size: 0.9rem;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+
+      .status-badge.error {
+        color: var(--error);
+        background: var(--error-bg);
+        border-color: #fecaca;
+      }
+
+      .status-badge.error .status-dot {
+        background: var(--error);
+      }
+
+      .status-badge.success {
+        color: var(--success);
+        background: var(--success-bg);
+        border-color: #bbf7d0;
+      }
+
+      .status-badge.success .status-dot {
+        background: var(--success);
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .value {
+        margin-top: 12px;
+        font-size: 2rem;
+        font-weight: 600;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+
+      .chart-box {
+        height: 260px;
+        position: relative;
+      }
+
+      .alert-table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 540px;
+      }
+
+      th, td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.95rem;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .warning-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--error-bg);
+        color: var(--error);
+        font-size: 0.9rem;
+      }
+
+      @media (max-width: 640px) {
+        body {
+          padding: 16px;
+        }
+
+        .header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .title {
+          font-size: 1.3rem;
+        }
+
+        .value {
+          font-size: 1.5rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="title">log-parser monitoring</div>
+        <div id="statusBadge" class="status-badge success">
+          <span class="status-dot"></span>
+          <span id="statusText">tailer attivo</span>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="label">righe processate</div>
+          <div id="processedLines" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">righe scartate</div>
+          <div id="droppedLines" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">alert generati</div>
+          <div id="alertsGenerated" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">latenza media sink</div>
+          <div id="avgLatency" class="value">0 ms</div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom: 24px;">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Andamento righe processate</h3>
+        <div class="chart-box">
+          <canvas id="historyChart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Ultimi alert</h3>
+        <div class="alert-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Timestamp</th>
+                <th>Messaggio</th>
+                <th>Sorgente</th>
+              </tr>
+            </thead>
+            <tbody id="alertsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const statusBadge = document.getElementById('statusBadge');
+      const statusText = document.getElementById('statusText');
+      const processedLines = document.getElementById('processedLines');
+      const droppedLines = document.getElementById('droppedLines');
+      const alertsGenerated = document.getElementById('alertsGenerated');
+      const avgLatency = document.getElementById('avgLatency');
+      const alertsTableBody = document.getElementById('alertsTableBody');
+
+      let chart = null;
+
+      function updateStatus(data) {
+        const active = data.tailer_active;
+        statusBadge.classList.toggle('success', active);
+        statusBadge.classList.toggle('error', !active);
+        statusText.textContent = active ? 'tailer attivo' : 'tailer fermo/errore';
+      }
+
+      function renderAlerts(alerts) {
+        if (!Array.isArray(alerts) || alerts.length === 0) {
+          alertsTableBody.innerHTML = '<tr><td colspan="4">Nessun alert rilevato.</td></tr>';
+          return;
+        }
+
+        alertsTableBody.innerHTML = alerts
+          .slice(0, 12)
+          .map((alert) => {
+            const level = alert.level || 'warning';
+            const icon = level === 'error' ? '⚠' : '•';
+            return `
+              <tr>
+                <td><span class="warning-pill">${icon}</span></td>
+                <td>${alert.timestamp || 'n/a'}</td>
+                <td>${(alert.message || '').replace(/</g, '&lt;')}</td>
+                <td>${(alert.source || 'unknown').replace(/</g, '&lt;')}</td>
+              </tr>
+            `;
+          })
+          .join('');
+      }
+
+      function renderChart(history) {
+        const labels = (history || []).map((entry) => {
+          const date = new Date(entry.timestamp);
+          return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        });
+        const values = (history || []).map((entry) => entry.processed_lines);
+
+        if (chart) {
+          chart.data.labels = labels;
+          chart.data.datasets[0].data = values;
+          chart.update();
+          return;
+        }
+
+        chart = new Chart(document.getElementById('historyChart'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Righe processate',
+              data: values,
+              borderColor: '#1f2937',
+              backgroundColor: 'rgba(31, 41, 55, 0.08)',
+              borderWidth: 2,
+              pointRadius: 0,
+              tension: 0.2,
+              fill: true,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'nearest', intersect: false },
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false } },
+              y: { beginAtZero: false, ticks: { precision: 0 } }
+            }
+          }
+        });
+      }
+
+      function refresh() {
+        fetch('/api/metrics.json', { headers: { Accept: 'application/json' } })
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error('metrics request failed');
+            }
+            return response.json();
+          })
+          .then((data) => {
+            updateStatus(data);
+            processedLines.textContent = data.processed_lines ?? 0;
+            droppedLines.textContent = data.dropped_lines ?? 0;
+            alertsGenerated.textContent = data.alerts_generated ?? 0;
+            avgLatency.textContent = `${(data.average_sink_latency_ms ?? 0).toFixed(1)} ms`;
+            renderChart(data.history || []);
+            renderAlerts(data.alerts || []);
+          })
+          .catch(() => {
+            statusBadge.classList.remove('success');
+            statusBadge.classList.add('error');
+            statusText.textContent = 'tailer fermo/errore';
+          });
+      }
+
+      refresh();
+      setInterval(refresh, 4000);
+    </script>
+  </body>
+</html>

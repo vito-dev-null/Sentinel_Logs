@@ -1,0 +1,14 @@
+version: '3.9'
+
+services:
+  log-parser:
+    build:
+      context: .
+    image: log-parser:latest
+    command: ["--file", "/var/log/app/app.log", "--sink", "stdout", "--sink", "file:/var/log/output/parsed.jsonl"]
+    volumes:
+      - ./logs:/var/log/app:ro
+      - ./output:/var/log/output
+    environment:
+      WEBHOOK_URL: ${WEBHOOK_URL:-https://example.com/webhook}
+      LOG_LEVEL: INFO
