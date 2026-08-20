@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from log_parser import cli
+from sentinellogs import cli
 
 
 def test_cli_requires_file_argument(monkeypatch):
@@ -40,7 +40,7 @@ def test_metrics_sources_includes_file_arg(tmp_path):
         # call parse only to exercise args processing
         parser_args = ["--file", str(sample)]
         # create a MetricsRegistry and set sources like the main would
-        from log_parser.metrics import MetricsRegistry
+        from sentinellogs.metrics import MetricsRegistry
         mr = MetricsRegistry()
         mr.set_sources([str(sample)])
         assert str(sample) in mr.as_dict().get('sources', [])

@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-sentinellogs = "log_parser.cli:main"
+sentinellogs = "sentinellogs.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

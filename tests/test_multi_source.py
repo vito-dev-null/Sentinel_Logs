@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from queue import Empty
 
-from log_parser.multi_source import InMemoryQueueBackend, MultiSourceTailer
+from sentinellogs.multi_source import InMemoryQueueBackend, MultiSourceTailer
 
 
 def test_multi_source_collector_reads_multiple_files(tmp_path: Path) -> None:

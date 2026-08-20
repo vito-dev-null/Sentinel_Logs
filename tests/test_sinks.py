@@ -4,8 +4,8 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from log_parser.schema import LogRecord
-from log_parser.sinks import AlertEngine, AlertRule, FileSink, StdoutSink, SyslogSink, WebhookSink, create_sink
+from sentinellogs.schema import LogRecord
+from sentinellogs.sinks import AlertEngine, AlertRule, FileSink, StdoutSink, SyslogSink, WebhookSink, create_sink
 
 
 def test_stdout_sink_emits_json() -> None:
@@ -33,7 +33,7 @@ def test_webhook_sink_retries_and_posts() -> None:
     fake_response.__enter__.return_value = fake_response
     fake_response.read.return_value = b'ok'
 
-    with patch('log_parser.sinks.urlopen', side_effect=[OSError('temporary fail'), fake_response]) as mock_urlopen:
+    with patch('sentinellogs.sinks.urlopen', side_effect=[OSError('temporary fail'), fake_response]) as mock_urlopen:
         sink = WebhookSink('https://example.com/hook', max_retries=2, backoff_seconds=0)
         sink.emit(record)
 
@@ -48,7 +48,7 @@ def test_syslog_sink_triggers_handler() -> None:
     fake_handler = MagicMock()
     fake_handler.level = logging.INFO
 
-    with patch('log_parser.sinks.logging.getLogger', return_value=fake_logger), patch('log_parser.sinks.SysLogHandler', return_value=fake_handler) as mock_syslog:
+    with patch('sentinellogs.sinks.logging.getLogger', return_value=fake_logger), patch('sentinellogs.sinks.SysLogHandler', return_value=fake_handler) as mock_syslog:
         sink = SyslogSink('localhost', 514)
         sink.emit(record)
 
@@ -76,7 +76,7 @@ def test_sentinellogs_sink_retries_and_posts() -> None:
     fake_response.__enter__.return_value = fake_response
     fake_response.read.return_value = b'ok'
 
-    with patch('log_parser.sinks.urlopen', side_effect=[OSError('temporary fail'), fake_response]) as mock_urlopen:
+    with patch('sentinellogs.sinks.urlopen', side_effect=[OSError('temporary fail'), fake_response]) as mock_urlopen:
         sink = create_sink('sentinellogs:https://sentinel.example.com/ingest')
         sink.emit(record)
 

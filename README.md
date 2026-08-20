@@ -92,7 +92,7 @@ This is not a substitute for a proper reverse proxy or SSO layer in production.
 
 ## Alerting
 
-The project supports pluggable sinks and alert rules. You can configure alerts in `src/log_parser/alerts.yaml` or pass a custom file with `--alert-config`.
+The project supports pluggable sinks and alert rules. You can configure alerts in `src/sentinellogs/alerts.yaml` or pass a custom file with `--alert-config`.
 
 Example `alerts.yaml`:
 
@@ -131,7 +131,7 @@ This pattern is useful for sending Slack/Teams notifications for SSH failures or
 
 ## Adding a new log format
 
-Edit the configuration file in `src/log_parser/patterns.yaml` and add a new section like:
+Edit the configuration file in `src/sentinellogs/patterns.yaml` and add a new section like:
 
 ```yaml
 nginx:

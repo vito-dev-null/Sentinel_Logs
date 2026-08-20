@@ -1,1 +1,1 @@
-include src/log_parser/patterns.yaml
+include src/sentinellogs/patterns.yaml

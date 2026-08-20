@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import urllib.request
 
-from log_parser.metrics import MetricsRegistry, start_metrics_server
+from sentinellogs.metrics import MetricsRegistry, start_metrics_server
 
 
 def test_metrics_registry_tracks_data() -> None:
@@ -15,11 +15,11 @@ def test_metrics_registry_tracks_data() -> None:
     registry.observe_sink_latency(42.0)
 
     prom = registry.render_prometheus()
-    assert 'log_parser_processed_lines_total 3' in prom
-    assert 'log_parser_dropped_lines_total 2' in prom
-    assert 'log_parser_parser_errors_total 1' in prom
-    assert 'log_parser_sink_errors_total 1' in prom
-    assert 'log_parser_sink_latency_ms 42.0' in prom
+    assert 'sentinellogs_processed_lines_total 3' in prom
+    assert 'sentinellogs_dropped_lines_total 2' in prom
+    assert 'sentinellogs_parser_errors_total 1' in prom
+    assert 'sentinellogs_sink_errors_total 1' in prom
+    assert 'sentinellogs_sink_latency_ms 42.0' in prom
 
     health = registry.health_json()
     assert health['processed_lines'] == 3
@@ -38,7 +38,7 @@ def test_dashboard_and_metrics_api() -> None:
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/dashboard', timeout=5) as response:
             body = response.read().decode('utf-8')
             assert response.status == 200
-            assert 'log-parser monitoring' in body
+            assert 'SentinelLogs monitoring' in body
 
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/metrics.json', timeout=5) as response:
             payload = json.loads(response.read().decode('utf-8'))
@@ -91,9 +91,9 @@ def test_recent_lines_buffer() -> None:
 
 def test_parsers_measure_duration_and_raw_line() -> None:
     # ensure ParserRegistry returns parse_duration_ms, matched_parser and raw_line on parsed records
-    from log_parser.parsers import ParserRegistry
+    from sentinellogs.parsers import ParserRegistry
     from pathlib import Path
-    reg = ParserRegistry.from_config(Path('src/log_parser/patterns.yaml'))
+    reg = ParserRegistry.from_config(Path('src/sentinellogs/patterns.yaml'))
     line = '2026-08-20 07:00:00 INFO myapp Started processing id=123 user=alice'
     rec = reg.parse_line(line)
     assert rec is not None

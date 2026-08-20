@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import time
 
-from log_parser.parsers import BaseLogParser, ParserRegistry
-from log_parser.schema import LogRecord
+from sentinellogs.parsers import BaseLogParser, ParserRegistry
+from sentinellogs.schema import LogRecord
 
 
 class SlowParser(BaseLogParser):

@@ -30,10 +30,10 @@ def configure_logging(level_name: str = "INFO") -> None:
 
 def _get_package_version() -> str:
     try:
-        return version("log-parser")
+        return version("sentinellogs")
     except PackageNotFoundError:
         try:
-            return version("log_parser")
+            return version("sentinellogs")
         except PackageNotFoundError:
             return "0.1.0"
 

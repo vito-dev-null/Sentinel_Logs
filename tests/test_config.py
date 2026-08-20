@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from log_parser.parsers import load_pattern_config
+from sentinellogs.parsers import load_pattern_config
 
 
 def test_load_yaml_config(tmp_path: Path) -> None:

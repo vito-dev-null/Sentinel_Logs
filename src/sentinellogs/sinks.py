@@ -175,7 +175,7 @@ class SyslogSink(BaseSink):
         self.username = username
         self.password = password
         self.secret_provider = secret_provider or EnvSecretProvider()
-        self.logger = logging.getLogger(f"log_parser.syslog.{host}:{port}")
+        self.logger = logging.getLogger(f"sentinellogs.syslog.{host}:{port}")
         self.logger.setLevel(logging.INFO)
         self.logger.propagate = False
         for existing_handler in list(self.logger.handlers):

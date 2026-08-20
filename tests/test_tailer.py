@@ -4,7 +4,7 @@ import threading
 import time
 from pathlib import Path
 
-from log_parser.tailer import LogTailer
+from sentinellogs.tailer import LogTailer
 
 
 def test_tailer_reads_incremental_lines(log_file: Path) -> None:

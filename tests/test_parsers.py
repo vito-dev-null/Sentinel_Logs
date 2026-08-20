@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from log_parser.parsers import AppLogParser, ParserRegistry, SyslogParser
+from sentinellogs.parsers import AppLogParser, ParserRegistry, SyslogParser
 
 
 @pytest.fixture
 def parser_specs() -> dict[str, str]:
-    config = ParserRegistry.from_config(Path(__file__).resolve().parents[1] / 'src' / 'log_parser' / 'patterns.yaml')
+    config = ParserRegistry.from_config(Path(__file__).resolve().parents[1] / 'src' / 'sentinellogs' / 'patterns.yaml')
     return {
         'syslog': config.parsers[0].pattern.pattern,
         'app': config.parsers[1].pattern.pattern,
@@ -82,7 +82,7 @@ def test_ip_extraction_absent() -> None:
 
 
 def test_registry_selects_correct_parser() -> None:
-    registry = ParserRegistry.from_config(Path(__file__).resolve().parents[1] / 'src' / 'log_parser' / 'patterns.yaml')
+    registry = ParserRegistry.from_config(Path(__file__).resolve().parents[1] / 'src' / 'sentinellogs' / 'patterns.yaml')
 
     syslog_record = registry.parse_line('Jan  5 10:22:31 host sshd[1234]: Failed password for root from 1.2.3.4 port 22')
     app_record = registry.parse_line('2026-08-20 10:22:31 [ERROR] Connection refused from 10.0.0.5')
