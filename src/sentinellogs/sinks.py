@@ -18,6 +18,7 @@ from .schema import LogRecord
 from .secrets import EnvSecretProvider, SecretProvider
 
 logger = logging.getLogger(__name__)
+USER_AGENT = "sentinellogs/0.2.0"
 
 
 class BaseSink(ABC):
@@ -132,7 +133,7 @@ class WebhookSink(BaseSink):
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "log-parser/1.0",
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )
@@ -205,7 +206,7 @@ class SentinelLogsSink(BaseSink):
         payload = json.dumps(record.to_dict(), ensure_ascii=False).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "log-parser/1.0",
+            "User-Agent": USER_AGENT,
         }
         # if api_key provided, prefer that; otherwise check environment variable SENTINEL_API_KEY
         api_key = self.api_key or os.environ.get("SENTINEL_API_KEY")
@@ -392,17 +393,11 @@ def create_sink(sink_spec: str) -> BaseSink:
         if not endpoint.startswith("http"):
             raise ValueError(f"Invalid SentinelLogs endpoint in sink specification: {sink_spec}")
         api_key = None
-        # parse optional params
-        for p in parts[1:]:
-            if p.startswith("apikey="):
-                val = p.split("=", 1)[1]
-                # resolve secret reference if present
-                if val.startswith("${") and val.endswith("}"):
-                    name = val[2:-1]
-                    provider = EnvSecretProvider()
-                    api_key = provider.get_secret(name)
-                else:
-                    api_key = val
+        for part in parts[1:]:
+            for prefix in ("apikey=", "apikey:"):
+                if part.startswith(prefix):
+                    api_key = _resolve_secret_reference(part[len(prefix):])
+                    break
         return SentinelLogsSink(endpoint=endpoint, api_key=api_key)
 
     if sink_spec.startswith("syslog:"):

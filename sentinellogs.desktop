@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SentinelLogs Security Dashboard
+Comment=Monitoraggio sicurezza e autenticazione locale
+Exec=/home/local-user/Desktop/Applicazioni/SentinelLogs/launch-dashboard.sh
+Icon=/home/local-user/Desktop/Applicazioni/SentinelLogs/assets/sentinellogs-security.svg
+Terminal=false
+Categories=System;Security;
+StartupNotify=true

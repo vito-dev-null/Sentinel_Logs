@@ -1,12 +1,48 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Iterator, TextIO
 
 logger = logging.getLogger(__name__)
+
+
+def journal_lines(identifiers: tuple[str, ...] = ("sshd", "sudo", "systemd-logind")) -> Iterator[str]:
+    """Follow journald authentication services without fabricating log records."""
+    command = ["journalctl", "-f", "-n", "0", "-o", "json"]
+    for index, identifier in enumerate(identifiers):
+        if index:
+            command.append("+")
+        command.append("_COMM=" + identifier)
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as exc:
+        raise RuntimeError("journalctl is unavailable; provide a readable auth.log or syslog") from exc
+    if process.stdout is None:
+        process.kill()
+        raise RuntimeError("journalctl did not provide a readable stream")
+    try:
+        for line in process.stdout:
+            try:
+                entry = json.loads(line)
+                timestamp = entry.get("__REALTIME_TIMESTAMP")
+                message = entry.get("MESSAGE", "")
+                hostname = entry.get("_HOSTNAME", "localhost")
+                process_name = entry.get("SYSLOG_IDENTIFIER") or entry.get("_COMM", "journal")
+                if timestamp and str(timestamp).isdigit():
+                    from datetime import datetime, timezone
+                    timestamp_text = datetime.fromtimestamp(int(timestamp) / 1_000_000, timezone.utc).isoformat()
+                else:
+                    timestamp_text = str(timestamp or "")
+                yield f"{timestamp_text} {hostname} {process_name}: {message}\n"
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Ignoring malformed journal JSON record")
+    finally:
+        process.terminate()
 
 
 class LogTailer:

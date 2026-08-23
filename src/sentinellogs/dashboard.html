@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SentinelLogs dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.5.1/chart.umd.min.js"></script>
     <style>
       :root {
         --bg: #0b1020;
@@ -159,6 +158,14 @@
         font-size: 0.9rem;
       }
 
+      .log-row-critical { background: #3a0b10; border-left: 4px solid #ff1e27; color: #fff1f2; }
+      .log-row-warning { background: #4a2500; border-left: 4px solid #ff8c00; color: #fff7ed; }
+      .log-row-neutral { background: rgba(22, 163, 74, 0.08); border-left: 4px solid #16a34a; }
+      .risk-badge { display: inline-block; margin-right: 6px; padding: 3px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+      .risk-critical { background: #ff1e27; color: #fff; }
+      .risk-warning { background: #ff8c00; color: #1f1200; }
+      .risk-neutral { background: #16a34a; color: #fff; }
+
       @media (max-width: 640px) {
         body {
           padding: 16px;
@@ -211,6 +218,18 @@
         </div>
       </div>
 
+      <div class="cards">
+        <div class="card"><div class="label">integrità audit SHA-256</div><div id="integrityStatus" class="value">non verificata</div></div>
+        <div class="card"><div class="label">stato compliance</div><div id="complianceStatus" class="value">in attesa</div></div>
+        <div class="card"><div class="label">servizi infrastruttura</div><div id="dependencyStatus" class="value">in attesa</div></div>
+      </div>
+
+      <div class="panel" style="margin-bottom: 24px;">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Impossible Travel / SOAR</h3>
+        <div id="travelIndicators">Nessun evento impossible travel.</div>
+        <div id="soarStatus" style="margin-top: 12px; color: var(--muted);"></div>
+      </div>
+
       <div class="panel" style="margin-bottom: 24px;">
         <h3 style="margin: 0 0 12px; font-size: 1rem;">Andamento righe processate</h3>
         <div class="chart-box">
@@ -233,6 +252,10 @@
             <thead>
               <tr>
                 <th style="width:160px;">Timestamp</th>
+                <th style="width:180px;">Sorgente</th>
+                <th style="width:150px;">IP origine</th>
+                <th style="width:130px;">Utente</th>
+                <th style="width:150px;">Host</th>
                 <th style="width:140px;">Pattern</th>
                 <th style="width:110px;">Parsing (ms)</th>
                 <th>Riga originale</th>
@@ -280,6 +303,39 @@
         statusText.textContent = active ? 'tailer attivo' : 'tailer fermo/errore';
       }
 
+      const AUTHORIZED_USER = 'local-user';
+      const AUTHORIZED_HOST = 'PC';
+      const LOCAL_NETWORKS = [
+        { base: [10, 0, 0, 0], mask: 8 },
+        { base: [172, 16, 0, 0], mask: 12 },
+        { base: [192, 168, 0, 0], mask: 16 },
+        { base: [127, 0, 0, 0], mask: 8 },
+      ];
+
+      function isLocalAddress(value) {
+        const ip = String(value || '').trim();
+        const octets = ip.split('.').map(Number);
+        if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+        const valueNumber = octets.reduce((total, part) => (total * 256) + part, 0) >>> 0;
+        return LOCAL_NETWORKS.some(({ base, mask }) => {
+          const baseNumber = base.reduce((total, part) => (total * 256) + part, 0) >>> 0;
+          const networkMask = (0xffffffff << (32 - mask)) >>> 0;
+          return (valueNumber & networkMask) === (baseNumber & networkMask);
+        });
+      }
+
+      function classifyLog(entry) {
+        const user = String(entry['user.name'] || '').trim();
+        const host = String(entry['host.hostname'] || '').trim();
+        const ip = String(entry['source.ip'] || (entry.ips || [])[0] || '').trim();
+        const message = String(entry.message || entry.raw_line || entry.raw || '').toLowerCase();
+        const failedLogin = entry['event.outcome'] === 'failure' || /failed password|failed publickey|authentication failure|invalid user|login failure/.test(message);
+        const parser = String(entry.matched_parser || entry.format || '').toLowerCase();
+        if (!user || !host || !ip || parser === 'unknown' || failedLogin || user !== AUTHORIZED_USER || host !== AUTHORIZED_HOST) return { level: 'critical', label: 'critical' };
+        if (!isLocalAddress(ip)) return { level: 'warning', label: 'warning' };
+        return { level: 'neutral', label: 'neutral' };
+      }
+
       function renderAlerts(alerts) {
         if (!Array.isArray(alerts) || alerts.length === 0) {
           alertsTableBody.innerHTML = '<tr><td colspan="4">Nessun alert rilevato.</td></tr>';
@@ -291,16 +347,34 @@
           .map((alert) => {
             const level = alert.level || 'warning';
             const icon = level === 'error' ? '⚠' : '•';
+            const blockButton = alert.source && alert.source !== 'unknown' ? `<button class="block-ip" data-ip="${String(alert.source).replace(/"/g, '&quot;')}" type="button">Blocca IP</button>` : '';
             return `
               <tr>
                 <td><span class="warning-pill">${icon}</span></td>
                 <td>${alert.timestamp || 'n/a'}</td>
                 <td>${(alert.message || '').replace(/</g, '&lt;')}</td>
-                <td>${(alert.source || 'unknown').replace(/</g, '&lt;')}</td>
+                <td>${(alert.source || 'unknown').replace(/</g, '&lt;')} ${blockButton}</td>
               </tr>
             `;
           })
           .join('');
+      }
+
+      function renderSecurityState(data) {
+        document.getElementById('integrityStatus').textContent = data.integrity_verified ? 'verificata' : 'non verificata';
+        const compliance = data.compliance || {};
+        document.getElementById('complianceStatus').textContent = Object.values(compliance).every((value) => value === 'ready') ? 'pronto' : 'attenzione';
+        const dependencies = data.dependencies || {};
+        document.getElementById('dependencyStatus').textContent = Object.values(dependencies).every(Boolean) ? 'operativi' : 'degradati';
+        const travel = (data.alerts || []).filter((alert) => alert.details && alert.details.distance_km);
+        document.getElementById('travelIndicators').innerHTML = travel.length ? travel.map((alert) => `<div class="card"><strong>${alert.source || 'IP sconosciuto'}</strong> - ${alert.message}<br><small>Distanza: ${alert.details.distance_km} km, velocità: ${alert.details.speed_kmh} km/h</small></div>`).join('') : 'Nessun evento impossible travel.';
+      }
+
+      function bindSoarButtons() {
+        document.querySelectorAll('.block-ip').forEach((button) => {
+          button.onclick = () => fetch('/api/soar/block-ip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ip: button.dataset.ip}) })
+            .then((response) => { document.getElementById('soarStatus').textContent = response.ok ? 'Richiesta di blocco inviata.' : 'SOAR non configurato o richiesta rifiutata.'; });
+        });
       }
 
       function renderChart(history) {
@@ -427,6 +501,8 @@
             } catch (e) {}
             renderChart(data.history || []);
             renderAlerts(data.alerts || []);
+            renderSecurityState(data);
+            bindSoarButtons();
           // render recent lines
           renderRecentLines(data.recent_lines || []);
           })
@@ -546,13 +622,18 @@
           // include data attributes for rules and sinks to use on expand
           const dataRules = (entry.matching_rules || []).map(r => String(r).replace(/"/g, '&quot;')).join('|');
           const dataSinks = (entry.alert_sinks || []).map(s => String(s).replace(/"/g, '&quot;')).join('|');
+          const risk = classifyLog(entry);
           return `
-            <tr data-full=\"${rawEsc}\" data-rules=\"${dataRules}\" data-sinks=\"${dataSinks}\">\n
+            <tr class=\"log-row-${risk.level}\" data-full=\"${rawEsc}\" data-rules=\"${dataRules}\" data-sinks=\"${dataSinks}\">\\n
               <td>${entry.processed_at || entry.timestamp || ''}</td>
+              <td>${String(entry.source || '(sconosciuta)').replace(/</g, '&lt;')}</td>
+              <td>${String(entry['source.ip'] || '(n/d)').replace(/</g, '&lt;')}</td>
+              <td>${String(entry['user.name'] || '(n/d)').replace(/</g, '&lt;')}</td>
+              <td>${String(entry['host.hostname'] || '(n/d)').replace(/</g, '&lt;')}</td>
               <td>${parserBadge}</td>
               <td style=\"text-align:center;\">${durBadge}</td>
               <td class=\"msg-cell\" style=\"max-width:60ch; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;\">${short}<div style=\"margin-top:6px;\">${ruleHtml}</div></td>
-              <td style=\"text-align:center;\">${alertHtml}<div style=\"margin-top:6px; font-size:0.85rem; color:var(--muted);\">${sinkHtml}</div></td>
+              <td style=\"text-align:center;\"><span class=\"risk-badge risk-${risk.level}\">${risk.label}</span>${alertHtml}<div style=\"margin-top:6px; font-size:0.85rem; color:var(--muted);\">${sinkHtml}</div></td>
             </tr>
           `;
         }).join('');
@@ -584,7 +665,7 @@
             const row = document.createElement('tr');
             row.className = 'full-row';
             const td = document.createElement('td');
-            td.colSpan = 4;
+            td.colSpan = 9;
             td.style.background = 'var(--panel)';
             td.style.padding = '10px';
             // build expanded content with raw line, rules and sinks
@@ -654,6 +735,12 @@
 
       refresh();
       setInterval(refresh, 4000);
+      if (window.EventSource) {
+        const events = new EventSource('/api/events');
+        events.addEventListener('snapshot', (event) => {
+          try { renderSecurityState(JSON.parse(event.data)); } catch (error) { /* next poll repairs the view */ }
+        });
+      }
     </script>
   </body>
 </html>

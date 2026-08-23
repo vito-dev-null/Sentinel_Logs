@@ -159,10 +159,12 @@ class ParserRegistry:
         parsers: Sequence[BaseLogParser] | None = None,
         max_line_length: int = DEFAULT_MAX_LINE_LENGTH,
         parse_timeout_ms: int = DEFAULT_PARSE_TIMEOUT_MS,
+        ignored_processes: Sequence[str] | None = None,
     ) -> None:
         self.parsers = list(parsers or [])
         self.max_line_length = max_line_length
         self.parse_timeout_ms = parse_timeout_ms
+        self.ignored_processes = {str(name).strip().lower() for name in (ignored_processes or []) if str(name).strip()}
 
     @classmethod
     def from_config(
@@ -177,8 +179,13 @@ class ParserRegistry:
 
         config = load_pattern_config(config_file)
         audit_config(config_file)
+        ignored_processes = config.get("ignore_processes", [])
+        if not isinstance(ignored_processes, list):
+            raise ValueError("ignore_processes must be a list")
         registry_parsers: list[BaseLogParser] = []
         for format_name, spec in config.items():
+            if format_name == "ignore_processes":
+                continue
             if not isinstance(spec, dict):
                 logger.warning("Skipping invalid config for %s", format_name)
                 continue
@@ -189,10 +196,15 @@ class ParserRegistry:
                 continue
             parser_name = "SyslogParser" if format_name == "syslog" else "AppLogParser"
             registry_parsers.append(build_parser_from_name(parser_name, format_name, pattern, fields))
-        return cls(registry_parsers, max_line_length=max_line_length, parse_timeout_ms=parse_timeout_ms)
+        return cls(
+            registry_parsers,
+            max_line_length=max_line_length,
+            parse_timeout_ms=parse_timeout_ms,
+            ignored_processes=ignored_processes,
+        )
 
     def _safe_parse(self, parser: BaseLogParser, line: str) -> LogRecord | None:
-        if os.name != "nt" and hasattr(signal, "SIGALRM"):
+        if os.name != "nt" and hasattr(signal, "SIGALRM") and threading.current_thread() is threading.main_thread():
             return self._safe_parse_with_signal(parser, line)
         return self._safe_parse_with_thread(parser, line)
 
@@ -254,6 +266,9 @@ class ParserRegistry:
         for parser in self.parsers:
             parsed = self._safe_parse(parser, clean_line)
             if parsed is not None:
+                if parsed.process and parsed.process.strip().lower() in self.ignored_processes:
+                    logger.debug("Ignoring noisy process %s", parsed.process)
+                    return None
                 return parsed
 
         logger.debug("No parser matched line: %s", clean_line[:120])

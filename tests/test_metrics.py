@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from urllib.error import HTTPError
 
 from sentinellogs.metrics import MetricsRegistry, start_metrics_server
 
@@ -40,6 +41,24 @@ def test_dashboard_and_metrics_api() -> None:
             assert response.status == 200
             assert 'SentinelLogs monitoring' in body
 
+        registry.set_tailer_active(False)
+        try:
+            urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=5)
+        except HTTPError as error:
+            assert error.code == 503
+
+        received = []
+        server.ingest_callback = lambda payload, agent_id: received.append((payload, agent_id)) or 1
+        request = urllib.request.Request(
+            f'http://127.0.0.1:{port}/v1/ingest',
+            data=json.dumps({'events': []}).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'X-Sentinel-Agent': 'local-test'},
+            method='POST',
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+        assert received[0][1] == 'local-test'
+
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/metrics.json', timeout=5) as response:
             payload = json.loads(response.read().decode('utf-8'))
             assert response.status == 200
@@ -51,6 +70,17 @@ def test_dashboard_and_metrics_api() -> None:
             assert payload['alerts'][0]['message'] == 'Failed password for root'
             # recent_lines endpoint / field should be present (may be empty)
             assert 'recent_lines' in payload
+            assert 'dependencies' in payload
+            assert isinstance(payload['compliance'], dict)
+
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/events', timeout=5) as response:
+            stream = response.read().decode('utf-8')
+            assert response.headers['Content-Type'].startswith('text/event-stream')
+            assert 'event: snapshot' in stream
+
+        registry.set_tailer_active(True)
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=5) as response:
+            assert response.status == 200
     finally:
         server.shutdown()
         server.server_close()
@@ -73,7 +103,7 @@ def test_history_buffer_updates_after_events() -> None:
 def test_recent_lines_buffer() -> None:
     registry = MetricsRegistry(history_size=5, alert_size=5, recent_size=3)
     # simulate three processed records
-    registry.record_recent_line({'format': 'app', 'timestamp': '2026-01-01T00:00:00', 'process': 'p1', 'message': 'one', 'raw_line': 'one'}, is_alert=False)
+    registry.record_recent_line({'format': 'app', 'timestamp': '2026-01-01T00:00:00', 'process': 'p1', 'message': 'one', 'raw_line': 'one', 'source': '/var/log/app.log'}, is_alert=False)
     registry.record_recent_line({'format': 'app', 'timestamp': '2026-01-01T00:00:01', 'process': 'p2', 'message': 'two', 'raw_line': 'two'}, is_alert=True)
     registry.record_recent_line({'format': 'syslog', 'timestamp': '2026-01-01T00:00:02', 'process': 'p3', 'message': 'three', 'raw_line': 'three'}, is_alert=False)
     payload = registry.as_dict()
@@ -85,8 +115,24 @@ def test_recent_lines_buffer() -> None:
     assert len(payload2['recent_lines']) == 3
     # most recent entry should be the last one recorded
     assert payload2['recent_lines'][-1]['process'] == 'p4'
+    assert payload['recent_lines'][0]['source'] == '/var/log/app.log'
     # check is_alert preserved
     assert any(e['is_alert'] for e in payload2['recent_lines'])
+
+
+def test_recent_line_exposes_identity_fallbacks() -> None:
+    registry = MetricsRegistry()
+    registry.record_recent_line({
+        'format': 'syslog',
+        'message': 'session opened for user root by local-user',
+        'source.ip': '203.0.113.5',
+        'user.name': 'local-user',
+        'host.hostname': 'PC',
+    })
+    entry = registry.as_dict()['recent_lines'][0]
+    assert entry['source.ip'] == '203.0.113.5'
+    assert entry['user.name'] == 'local-user'
+    assert entry['host.hostname'] == 'PC'
 
 
 def test_parsers_measure_duration_and_raw_line() -> None:

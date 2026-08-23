@@ -81,3 +81,10 @@ def test_sentinellogs_sink_retries_and_posts() -> None:
         sink.emit(record)
 
     assert mock_urlopen.call_count == 2
+
+
+def test_sentinellogs_sink_accepts_apikey_colon_syntax(monkeypatch) -> None:
+    monkeypatch.setenv("SENTINEL_KEY_NAME", "secret-token")
+    sink = create_sink("sentinellogs:https://sentinel.example.com/ingest|apikey:${SENTINEL_KEY_NAME}")
+    assert sink.api_key == "secret-token"
+    assert sink.endpoint == "https://sentinel.example.com/ingest"

@@ -1,4 +1,4 @@
-"""SentinelLogs package (was log_parser)."""
+"""SentinelLogs: real-time log parsing, JSONL sinks, alerting, and metrics."""
 
 from .cli import main
 from .metrics import MetricsRegistry
@@ -6,7 +6,17 @@ from .multi_source import InMemoryQueueBackend, MultiSourceTailer, QueueBackend
 from .parsers import AppLogParser, BaseLogParser, ParserRegistry, SyslogParser
 from .schema import LogRecord
 from .secrets import AWSSecretsManagerProvider, EnvSecretProvider, SecretProvider, VaultSecretProvider
-from .sinks import AlertEngine, AlertRule, BaseSink, FileSink, StdoutSink, SyslogSink, WebhookSink, create_sink
+from .sinks import (
+    AlertEngine,
+    AlertRule,
+    BaseSink,
+    FileSink,
+    SentinelLogsSink,
+    StdoutSink,
+    SyslogSink,
+    WebhookSink,
+    create_sink,
+)
 from .tailer import LogTailer
 
 __all__ = [
@@ -26,6 +36,7 @@ __all__ = [
     "ParserRegistry",
     "QueueBackend",
     "SecretProvider",
+    "SentinelLogsSink",
     "StdoutSink",
     "SyslogSink",
     "SyslogParser",

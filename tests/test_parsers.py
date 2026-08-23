@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from sentinellogs.parsers import AppLogParser, ParserRegistry, SyslogParser
+from sentinellogs.parsers import AppLogParser, ParserRegistry, SyslogParser, normalize_timestamp_to_iso
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def test_syslog_parser_valid_record(parser_specs: dict[str, str]) -> None:
 
     assert record is not None
     assert record.format == 'syslog'
-    assert record.timestamp == 'Jan  5 10:22:31'
+    assert record.timestamp == normalize_timestamp_to_iso('Jan  5 10:22:31')
     assert record.host == 'host'
     assert record.process == 'sshd'
     assert record.pid == '1234'
@@ -38,7 +38,7 @@ def test_app_parser_valid_record(parser_specs: dict[str, str]) -> None:
 
     assert record is not None
     assert record.format == 'app'
-    assert record.timestamp == '2026-08-20 10:22:31'
+    assert record.timestamp == normalize_timestamp_to_iso('2026-08-20 10:22:31')
     assert record.level == 'ERROR'
     assert record.message == 'Connection refused from 10.0.0.5'
     assert record.ips == ['10.0.0.5']
@@ -55,7 +55,7 @@ def test_plain_app_parser_valid_record() -> None:
 
     assert record is not None
     assert record.format == 'app_plain'
-    assert record.timestamp == '2026-08-20 07:00:00'
+    assert record.timestamp == normalize_timestamp_to_iso('2026-08-20 07:00:00')
     assert record.level == 'INFO'
     assert record.process == 'myapp'
     assert record.message == 'Started processing id=123 user=alice'
@@ -92,3 +92,28 @@ def test_registry_selects_correct_parser() -> None:
     assert app_record.format == 'app'
     assert unknown_record.format == 'unknown'
     assert unknown_record.raw == 'riga senza pattern riconoscibile'
+
+
+def test_registry_parses_iso_syslog_line() -> None:
+    registry = ParserRegistry.from_config(Path(__file__).resolve().parents[1] / 'src' / 'sentinellogs' / 'patterns.yaml')
+
+    record = registry.parse_line(
+        '2026-08-21T22:55:21.705320+02:00 PC vsce-sign: SignatureIntegrityPolicy for primary package'
+    )
+
+    assert record is not None
+    assert record.format == 'syslog_iso'
+    assert record.host == 'PC'
+    assert record.process == 'vsce-sign'
+    assert record.message == 'SignatureIntegrityPolicy for primary package'
+
+
+def test_registry_ignores_configured_noisy_processes() -> None:
+    registry = ParserRegistry.from_config(Path(__file__).resolve().parents[1] / 'src' / 'sentinellogs' / 'patterns.yaml')
+
+    noisy = registry.parse_line('Aug 22 10:22:31 host chrome[1234]: routine browser event')
+    security_event = registry.parse_line('Aug 22 10:22:31 host sshd[1235]: Failed password for root from 203.0.113.5 port 22')
+
+    assert noisy is None
+    assert security_event is not None
+    assert security_event.process == 'sshd'

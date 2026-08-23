@@ -72,4 +72,8 @@ class MultiSourceTailer:
 
     def iter_lines(self) -> Iterator[str]:
         while True:
-            yield self.backend.get(timeout=0.5)
+            try:
+                yield self.backend.get(timeout=0.5)
+            except queue.Empty:
+                # A quiet source is expected; keep waiting for new log lines.
+                continue

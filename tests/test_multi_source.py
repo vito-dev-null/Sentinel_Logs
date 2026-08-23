@@ -7,6 +7,26 @@ from queue import Empty
 from sentinellogs.multi_source import InMemoryQueueBackend, MultiSourceTailer
 
 
+class TimeoutThenLineBackend(InMemoryQueueBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.timed_out = False
+
+    def get(self, block: bool = True, timeout: float | None = None) -> str:
+        if not self.timed_out:
+            self.timed_out = True
+            raise Empty
+        return super().get(block=block, timeout=timeout)
+
+
+def test_multi_source_iterator_survives_empty_queue() -> None:
+    backend = TimeoutThenLineBackend()
+    backend.put('after-timeout\n')
+    iterator = MultiSourceTailer([], backend=backend).iter_lines()
+
+    assert next(iterator) == 'after-timeout\n'
+
+
 def test_multi_source_collector_reads_multiple_files(tmp_path: Path) -> None:
     first = tmp_path / 'one.log'
     second = tmp_path / 'two.log'

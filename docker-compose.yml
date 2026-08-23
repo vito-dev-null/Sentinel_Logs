@@ -1,14 +1,89 @@
-version: '3.9'
-
 services:
-  log-parser:
+  sentinellogs:
     build:
       context: .
-    image: log-parser:latest
-    command: ["--file", "/var/log/app/app.log", "--sink", "stdout", "--sink", "file:/var/log/output/parsed.jsonl"]
+    image: sentinellogs:latest
+    env_file: .env
+    command:
+      - --file
+      - /var/log/app/app.log
+      - --sink
+      - stdout
+      - --sink
+      - file:/var/log/output/parsed.jsonl
+      - --metrics-port
+      - "9090"
+      - --ingestion-port
+      - "9443"
+      - --ingestion-certfile
+      - /app/tls/tls.crt
+      - --ingestion-keyfile
+      - /app/tls/tls.key
     volumes:
       - ./logs:/var/log/app:ro
       - ./output:/var/log/output
+      - ./geoip:/app/geoip:ro
+      - ./tls:/app/tls:ro
+    expose:
+      - "9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      WEBHOOK_URL: ${WEBHOOK_URL:-https://example.com/webhook}
-      LOG_LEVEL: INFO
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      SENTINEL_API_KEY: ${SENTINEL_API_KEY:-}
+      SENTINELLOGS_BASIC_AUTH: ${SENTINELLOGS_BASIC_AUTH:-}
+      SENTINELLOGS_TENANT_TOKENS: ${SENTINELLOGS_TENANT_TOKENS:-}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-postgres}
+      STORAGE_PATH: ${STORAGE_PATH:-/var/log/output}
+      QUEUE_BACKEND: ${QUEUE_BACKEND:-redis}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9090/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - sentinellogs
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./tls:/etc/nginx/tls:ro
+
+volumes:
+  postgres_data:
+  redis_data:

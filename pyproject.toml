@@ -4,16 +4,46 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinellogs"
-version = "0.1.0"
-description = "SentinelLogs: real-time log parser with regex-based extraction and JSONL output"
+version = "0.2.0"
+description = "Real-time log parser with regex extraction, JSONL sinks, alerting, and Prometheus metrics"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
+authors = [
+  { name = "SentinelLogs contributors" },
+]
+keywords = ["logging", "syslog", "siem", "observability", "jsonl", "prometheus"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Logging",
+]
 dependencies = [
   "PyYAML>=6.0",
+  "psycopg[binary]>=3.2.0",
+  "redis>=5.0.0",
+  "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+geoip = [
+  "geoip2>=4.8.0",
 ]
 
 [project.scripts]
 sentinellogs = "sentinellogs.cli:main"
+log-parser = "sentinellogs.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

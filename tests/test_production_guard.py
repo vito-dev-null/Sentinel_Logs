@@ -23,11 +23,8 @@ def test_cli_rejects_example_file_without_confirm(monkeypatch, tmp_path):
     sample = ex_dir / 'sample.log'
     sample.write_text('2026-01-01 00:00:00 INFO test\n', encoding='utf-8')
 
-    # main should return exit code 2 when trying to use a demo-like filename without --confirm-demo
-    with pytest.raises(SystemExit) as exc:
-        # simulate running: program --file <path>
-        cli.main(["--file", str(sample)])
-    assert exc.value.code in (1, 2)
+    # main returns 2 when a demo-like filename is used without --confirm-demo
+    assert cli.main(["--file", str(sample)]) == 2
 
 
 def test_metrics_sources_includes_file_arg(tmp_path):
@@ -46,3 +43,26 @@ def test_metrics_sources_includes_file_arg(tmp_path):
         assert str(sample) in mr.as_dict().get('sources', [])
     except Exception as e:
         pytest.fail(f"Unexpected exception during test: {e}")
+
+
+def test_record_from_json_preserves_source():
+    record = cli._record_from_json_line(
+        '{"format":"syslog","message":"Failed password","raw":"raw line","source":"/var/log/auth.log"}'
+    )
+
+    assert record is not None
+    assert record.source == "/var/log/auth.log"
+
+
+def test_security_alert_rules_cover_login_and_sudo():
+    engine = cli.build_alert_engine()
+
+    assert "ssh-failed-password" in engine.matching_rules(
+        cli.LogRecord(format="syslog", message="Failed password for root from 203.0.113.5")
+    )
+    assert "ssh-login-success" in engine.matching_rules(
+        cli.LogRecord(format="syslog", message="Accepted publickey for admin from 203.0.113.5")
+    )
+    assert "sudo-privileged-command" in engine.matching_rules(
+        cli.LogRecord(format="syslog", message="sudo: admin : TTY=pts/0 ; COMMAND=/usr/bin/id")
+    )
