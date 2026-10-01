@@ -1,4 +1,16 @@
 services:
+  log-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /logs && touch /logs/app.log && chown 10001:10001 /logs/app.log && chmod 640 /logs/app.log"]
+    volumes:
+      - app_logs:/logs
+
+  output-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /output && chown -R 10001:10001 /output"]
+    volumes:
+      - app_output:/output
+
   tls-init:
     image: alpine:3.20
     command: >-
@@ -6,7 +18,7 @@ services:
       if [ ! -f /tls/tls.crt ] || [ ! -f /tls/tls.key ]; then
       openssl req -x509 -nodes -newkey rsa:2048 -days 365
       -subj "/CN=sentinellogs" -keyout /tls/tls.key -out /tls/tls.crt >/dev/null 2>&1;
-      cp /tls/tls.crt /tls/ca.crt; chmod 600 /tls/tls.key; fi'
+      cp /tls/tls.crt /tls/ca.crt; fi; chown 10001:10001 /tls/tls.key; chmod 640 /tls/tls.key'
     volumes:
       - app_tls:/tls
 
@@ -39,6 +51,10 @@ services:
     expose:
       - "9090"
     depends_on:
+      log-init:
+        condition: service_completed_successfully
+      output-init:
+        condition: service_completed_successfully
       tls-init:
         condition: service_completed_successfully
     environment:
