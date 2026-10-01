@@ -1,0 +1,2 @@
+{"format":"unknown","parsed_at":"2026-08-20T05:24:18.411079Z","raw":"2026-08-20 07:00:00 INFO myapp Started processing id=123 user=alice"}
+{"format":"unknown","parsed_at":"2026-08-20T05:24:18.411484Z","raw":"2026-08-20 07:00:01 ERROR myapp Failed to open file /tmp/x: permission denied"}

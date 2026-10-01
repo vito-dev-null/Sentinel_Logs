@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import logging
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Iterator, TextIO
+
+logger = logging.getLogger(__name__)
+
+
+def journal_lines(identifiers: tuple[str, ...] = ("sshd", "sudo", "systemd-logind")) -> Iterator[str]:
+    """Follow journald authentication services without fabricating log records."""
+    command = ["journalctl", "-f", "-n", "0", "-o", "json"]
+    for index, identifier in enumerate(identifiers):
+        if index:
+            command.append("+")
+        command.append("_COMM=" + identifier)
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as exc:
+        raise RuntimeError("journalctl is unavailable; provide a readable auth.log or syslog") from exc
+    if process.stdout is None:
+        process.kill()
+        raise RuntimeError("journalctl did not provide a readable stream")
+    try:
+        for line in process.stdout:
+            try:
+                entry = json.loads(line)
+                timestamp = entry.get("__REALTIME_TIMESTAMP")
+                message = entry.get("MESSAGE", "")
+                hostname = entry.get("_HOSTNAME", "localhost")
+                process_name = entry.get("SYSLOG_IDENTIFIER") or entry.get("_COMM", "journal")
+                if timestamp and str(timestamp).isdigit():
+                    from datetime import datetime, timezone
+                    timestamp_text = datetime.fromtimestamp(int(timestamp) / 1_000_000, timezone.utc).isoformat()
+                else:
+                    timestamp_text = str(timestamp or "")
+                yield f"{timestamp_text} {hostname} {process_name}: {message}\n"
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Ignoring malformed journal JSON record")
+    finally:
+        process.terminate()
+
+
+class LogTailer:
+    """Tail a log file while handling rotation, truncation, and temporary unavailability."""
+
+    def __init__(self, file_path: str | Path, from_start: bool = False, poll_interval: float = 0.5) -> None:
+        self.file_path = Path(file_path)
+        self.from_start = from_start
+        self.poll_interval = poll_interval
+        self._handle: TextIO | None = None
+        self._last_inode: int | None = None
+        self._last_size = 0
+
+    def _close_file(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+
+    def _open_file(self, start_at_end: bool = True) -> None:
+        self._close_file()
+        if not self.file_path.exists():
+            logger.info("Configured log source is temporarily unavailable; waiting for it to reappear.")
+            self._handle = None
+            self._last_inode = None
+            self._last_size = 0
+            return
+
+        try:
+            handle = self.file_path.open("r", encoding="utf-8", errors="replace", newline="")
+        except FileNotFoundError:
+            logger.info("Configured log source is temporarily unavailable; waiting for it to reappear.")
+            self._handle = None
+            self._last_inode = None
+            self._last_size = 0
+            return
+
+        self._handle = handle
+        self._last_size = 0
+        try:
+            stats = os.stat(self.file_path)
+        except FileNotFoundError:
+            self._last_inode = None
+            return
+
+        self._last_inode = getattr(stats, "st_ino", None)
+        if start_at_end:
+            handle.seek(0, 2)
+        else:
+            handle.seek(0)
+        self._last_size = handle.tell()
+
+    def _check_rotation_or_truncate(self) -> bool:
+        if not self.file_path.exists():
+            return False
+
+        try:
+            stats = os.stat(self.file_path)
+        except FileNotFoundError:
+            return False
+
+        current_inode = getattr(stats, "st_ino", None)
+        current_size = stats.st_size
+
+        if self._last_inode is not None and current_inode is not None and current_inode != self._last_inode:
+            logger.info(
+                "Detected log rotation: inode changed from %s to %s",
+                self._last_inode,
+                current_inode,
+            )
+            return True
+
+        if current_size < self._last_size:
+            logger.info("Detected log truncation: size decreased from %s to %s", self._last_size, current_size)
+            return True
+
+        return False
+
+    def _ensure_handle(self) -> None:
+        if self._handle is None:
+            self._open_file(start_at_end=not self.from_start)
+
+    def __iter__(self) -> Iterator[str]:
+        if self.from_start:
+            if self.file_path.exists():
+                with self.file_path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+                    for line in handle:
+                        yield line
+
+        self._open_file(start_at_end=not self.from_start)
+
+        while True:
+            self._ensure_handle()
+            if self._handle is None:
+                time.sleep(self.poll_interval)
+                continue
+
+            try:
+                line = self._handle.readline()
+            except OSError as exc:
+                logger.warning("Error reading configured log source")
+                time.sleep(self.poll_interval)
+                continue
+
+            if line:
+                self._last_size = self._handle.tell()
+                yield line
+                continue
+
+            if self._check_rotation_or_truncate():
+                logger.info("Reopening rotated/truncated log source from the beginning.")
+                self._open_file(start_at_end=False)
+                continue
+
+            if not self.file_path.exists():
+                logger.info("Configured log source temporarily unavailable; retrying.")
+                time.sleep(self.poll_interval)
+                continue
+
+            time.sleep(self.poll_interval)

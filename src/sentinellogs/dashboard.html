@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SentinelLogs dashboard</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #0f1724;
+        --border: #1f2937;
+        --text: #e6eef8;
+        --muted: #93a3bf;
+        --success: #16a34a;
+        --success-bg: rgba(22,163,74,0.08);
+        --error: #ef4444;
+        --error-bg: rgba(239,68,68,0.06);
+        --accent: #60a5fa;
+        --muted-panel: #0b1220;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .title {
+        font-size: 1.6rem;
+        font-weight: 600;
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: var(--panel);
+        font-size: 0.9rem;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+
+      .status-badge.error {
+        color: var(--error);
+        background: var(--error-bg);
+        border-color: #fecaca;
+      }
+
+      .status-badge.error .status-dot {
+        background: var(--error);
+      }
+
+      .status-badge.success {
+        color: var(--success);
+        background: var(--success-bg);
+        border-color: #bbf7d0;
+      }
+
+      .status-badge.success .status-dot {
+        background: var(--success);
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .value {
+        margin-top: 12px;
+        font-size: 2rem;
+        font-weight: 600;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px;
+      }
+
+      .chart-box {
+        height: 260px;
+        position: relative;
+      }
+
+      .alert-table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 540px;
+      }
+
+      th, td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.95rem;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .warning-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--error-bg);
+        color: var(--error);
+        font-size: 0.9rem;
+      }
+
+      .log-row-critical { background: #3a0b10; border-left: 4px solid #ff1e27; color: #fff1f2; }
+      .log-row-warning { background: #4a2500; border-left: 4px solid #ff8c00; color: #fff7ed; }
+      .log-row-neutral { background: rgba(22, 163, 74, 0.08); border-left: 4px solid #16a34a; }
+      .risk-badge { display: inline-block; margin-right: 6px; padding: 3px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+      .risk-critical { background: #ff1e27; color: #fff; }
+      .risk-warning { background: #ff8c00; color: #1f1200; }
+      .risk-neutral { background: #16a34a; color: #fff; }
+
+      @media (max-width: 640px) {
+        body {
+          padding: 16px;
+        }
+
+        .header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .title {
+          font-size: 1.3rem;
+        }
+
+        .value {
+          font-size: 1.5rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <div class="title">SentinelLogs monitoring</div>
+          <div id="sourceBadge" style="font-size:0.9rem; color:var(--muted);">Sorgente: <span id="sourceText">(non impostata)</span></div>
+        </div>
+        <div id="statusBadge" class="status-badge success">
+          <span class="status-dot"></span>
+          <span id="statusText">tailer attivo</span>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="label">righe processate</div>
+          <div id="processedLines" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">righe scartate</div>
+          <div id="droppedLines" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">alert generati</div>
+          <div id="alertsGenerated" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">latenza media sink</div>
+          <div id="avgLatency" class="value">0 ms</div>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card"><div class="label">integrità audit SHA-256</div><div id="integrityStatus" class="value">non verificata</div></div>
+        <div class="card"><div class="label">stato compliance</div><div id="complianceStatus" class="value">in attesa</div></div>
+        <div class="card"><div class="label">servizi infrastruttura</div><div id="dependencyStatus" class="value">in attesa</div></div>
+      </div>
+
+      <div class="panel" style="margin-bottom: 24px;">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Impossible Travel / SOAR</h3>
+        <div id="travelIndicators">Nessun evento impossible travel.</div>
+        <div id="soarStatus" style="margin-top: 12px; color: var(--muted);"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom: 24px;">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Andamento righe processate</h3>
+        <div class="chart-box">
+          <canvas id="historyChart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom: 24px;">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Attività recente</h3>
+        <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+          <label style="display:inline-flex; align-items:center; gap:8px; font-size:0.9rem;"><input id="filterAlertsToggle" type="checkbox"> Mostra solo alert</label>
+          <input id="searchBox" placeholder="Cerca nel messaggio" style="flex:1; padding:8px; border:1px solid var(--border); border-radius:6px;" />
+          <div style="display:flex; gap:12px; align-items:center;">
+            <div style="min-width:160px; text-align:right; font-size:0.9rem; color:var(--muted);">Righe ultimi 60s: <span id="last60Count">0</span></div>
+            <div style="min-width:200px; text-align:right; font-size:0.9rem; color:var(--muted);">Durata media parsing: <span id="avgParseDuration">0.0 ms</span></div>
+          </div>
+        </div>
+        <div id="recentWrap" class="alert-table-wrap" style="max-height:300px; overflow:auto;">
+          <table style="width:100%;">
+            <thead>
+              <tr>
+                <th style="width:160px;">Timestamp</th>
+                <th style="width:180px;">Sorgente</th>
+                <th style="width:150px;">IP origine</th>
+                <th style="width:130px;">Utente</th>
+                <th style="width:150px;">Host</th>
+                <th style="width:140px;">Pattern</th>
+                <th style="width:110px;">Parsing (ms)</th>
+                <th>Riga originale</th>
+                <th style="width:60px;">Alert</th>
+              </tr>
+            </thead>
+            <tbody id="recentTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Ultimi alert</h3>
+        <div class="alert-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Timestamp</th>
+                <th>Messaggio</th>
+                <th>Sorgente</th>
+              </tr>
+            </thead>
+            <tbody id="alertsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const statusBadge = document.getElementById('statusBadge');
+      const statusText = document.getElementById('statusText');
+      const processedLines = document.getElementById('processedLines');
+      const droppedLines = document.getElementById('droppedLines');
+      const alertsGenerated = document.getElementById('alertsGenerated');
+      const avgLatency = document.getElementById('avgLatency');
+      const alertsTableBody = document.getElementById('alertsTableBody');
+
+      let chart = null;
+
+      function updateStatus(data) {
+        const active = data.tailer_active;
+        statusBadge.classList.toggle('success', active);
+        statusBadge.classList.toggle('error', !active);
+        statusText.textContent = active ? 'tailer attivo' : 'tailer fermo/errore';
+      }
+
+      const LOCAL_NETWORKS = [
+        { base: [10, 0, 0, 0], mask: 8 },
+        { base: [172, 16, 0, 0], mask: 12 },
+        { base: [192, 168, 0, 0], mask: 16 },
+        { base: [127, 0, 0, 0], mask: 8 },
+      ];
+
+      function isLocalAddress(value) {
+        const ip = String(value || '').trim();
+        const octets = ip.split('.').map(Number);
+        if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+        const valueNumber = octets.reduce((total, part) => (total * 256) + part, 0) >>> 0;
+        return LOCAL_NETWORKS.some(({ base, mask }) => {
+          const baseNumber = base.reduce((total, part) => (total * 256) + part, 0) >>> 0;
+          const networkMask = (0xffffffff << (32 - mask)) >>> 0;
+          return (valueNumber & networkMask) === (baseNumber & networkMask);
+        });
+      }
+
+      function classifyLog(entry) {
+        const user = String(entry['user.name'] || '').trim();
+        const host = String(entry['host.hostname'] || '').trim();
+        const ip = String(entry['source.ip'] || (entry.ips || [])[0] || '').trim();
+        const message = String(entry.message || entry.raw_line || entry.raw || '').toLowerCase();
+        const failedLogin = entry['event.outcome'] === 'failure' || /failed password|failed publickey|authentication failure|invalid user|login failure/.test(message);
+        const parser = String(entry.matched_parser || entry.format || '').toLowerCase();
+        if (!user || !host || !ip || parser === 'unknown' || failedLogin) return { level: 'critical', label: 'critical' };
+        if (!isLocalAddress(ip)) return { level: 'warning', label: 'warning' };
+        return { level: 'neutral', label: 'neutral' };
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        })[character]);
+      }
+      function renderAlerts(alerts) {
+        if (!Array.isArray(alerts) || alerts.length === 0) {
+          alertsTableBody.innerHTML = '<tr><td colspan="4">Nessun alert rilevato.</td></tr>';
+          return;
+        }
+
+        alertsTableBody.innerHTML = alerts
+          .slice(0, 12)
+          .map((alert) => {
+            const level = alert.level || 'warning';
+            const icon = level === 'error' ? '⚠' : '•';
+            const blockButton = alert.source && alert.source !== 'unknown' ? `<button class=\"block-ip\" data-ip=\"${escapeHtml(alert.source)}\" type=\"button\">Blocca IP</button>` : '';
+            return `
+              <tr>
+                <td><span class="warning-pill">${icon}</span></td>
+                <td>${escapeHtml(alert.timestamp || 'n/a')}</td>
+                <td>${escapeHtml(alert.message || '')}</td>
+                <td>${escapeHtml(alert.source || 'unknown')} ${blockButton}</td>
+              </tr>
+            `;
+          })
+          .join('');
+      }
+
+      function renderSecurityState(data) {
+        document.getElementById('integrityStatus').textContent = data.integrity_verified ? 'verificata' : 'non verificata';
+        const compliance = data.compliance || {};
+        document.getElementById('complianceStatus').textContent = Object.values(compliance).every((value) => value === 'ready') ? 'pronto' : 'attenzione';
+        const dependencies = data.dependencies || {};
+        document.getElementById('dependencyStatus').textContent = Object.values(dependencies).every(Boolean) ? 'operativi' : 'degradati';
+        const travel = (data.alerts || []).filter((alert) => alert.details && alert.details.distance_km);
+        document.getElementById('travelIndicators').innerHTML = travel.length ? travel.map((alert) => `<div class=\"card\"><strong>${escapeHtml(alert.source || 'IP sconosciuto')}</strong> - ${escapeHtml(alert.message)}<br><small>Distanza: ${escapeHtml(alert.details.distance_km)} km, velocità: ${escapeHtml(alert.details.speed_kmh)} km/h</small></div>`).join('') : 'Nessun evento impossible travel.';
+      }
+
+      function bindSoarButtons() {
+        document.querySelectorAll('.block-ip').forEach((button) => {
+          button.onclick = () => fetch('/api/soar/block-ip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ip: button.dataset.ip}) })
+            .then((response) => { document.getElementById('soarStatus').textContent = response.ok ? 'Richiesta di blocco inviata.' : 'SOAR non configurato o richiesta rifiutata.'; });
+        });
+      }
+
+      function renderChart(history) {
+        const labels = (history || []).map((entry) => {
+          const date = new Date(entry.timestamp);
+          return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        });
+        const values = (history || []).map((entry) => entry.processed_lines || 0);
+
+        const canvas = document.getElementById('historyChart');
+
+        // If Chart.js is not available (offline), draw a simple fallback chart on the canvas
+        if (typeof Chart === 'undefined') {
+          try {
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.clientWidth || 600;
+            const h = canvas.clientHeight || 260;
+            canvas.width = Math.max(100, Math.floor(w * dpr));
+            canvas.height = Math.max(50, Math.floor(h * dpr));
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            // clear
+            ctx.clearRect(0, 0, w, h);
+            // background
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, w, h);
+            // no data
+            if (!values || values.length === 0) {
+              ctx.fillStyle = '#6b7280';
+              ctx.font = '14px Arial';
+              ctx.fillText('Nessun dato disponibile', 12, 28);
+              return;
+            }
+            // compute plot area
+            const left = 40, right = w - 10, top = 10, bottom = h - 20;
+            const plotW = right - left, plotH = bottom - top;
+            const maxv = Math.max(...values);
+            const minv = Math.min(...values);
+            const range = Math.max(1, maxv - minv);
+            // draw axes
+            ctx.strokeStyle = '#e5e7eb';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(left, top);
+            ctx.lineTo(left, bottom);
+            ctx.lineTo(right, bottom);
+            ctx.stroke();
+            // draw line
+            ctx.strokeStyle = '#1f2937';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            values.forEach((v, i) => {
+              const x = left + (values.length === 1 ? plotW / 2 : (i / (values.length - 1)) * plotW);
+              const y = bottom - ((v - minv) / range) * plotH;
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            // small labels
+            ctx.fillStyle = '#374151';
+            ctx.font = '12px Arial';
+            ctx.fillText(String(maxv), 6, top + 12);
+            ctx.fillText(String(minv), 6, bottom);
+          } catch (e) {
+            // if canvas fails, silently ignore
+          }
+          return;
+        }
+
+        if (chart) {
+          chart.data.labels = labels;
+          chart.data.datasets[0].data = values;
+          chart.update();
+          return;
+        }
+
+        chart = new Chart(document.getElementById('historyChart'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Righe processate',
+              data: values,
+              borderColor: '#1f2937',
+              backgroundColor: 'rgba(31, 41, 55, 0.08)',
+              borderWidth: 2,
+              pointRadius: 0,
+              tension: 0.2,
+              fill: true,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'nearest', intersect: false },
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false } },
+              y: { beginAtZero: false, ticks: { precision: 0 } }
+            }
+          }
+        });
+      }
+
+      function refresh() {
+        fetch('/api/metrics.json', { headers: { Accept: 'application/json' } })
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error('metrics request failed');
+            }
+            return response.json();
+          })
+          .then((data) => {
+            updateStatus(data);
+            processedLines.textContent = data.processed_lines ?? 0;
+            droppedLines.textContent = data.dropped_lines ?? 0;
+            alertsGenerated.textContent = data.alerts_generated ?? 0;
+            avgLatency.textContent = `${(data.average_sink_latency_ms ?? 0).toFixed(1)} ms`;
+            // display monitored sources (explicit and visible badge)
+            try {
+              const srcs = data.sources || [];
+              const srcText = Array.isArray(srcs) ? srcs.join(', ') : String(srcs || '');
+              document.getElementById('sourceText').textContent = srcText || '(non impostata)';
+            } catch (e) {}
+            renderChart(data.history || []);
+            renderAlerts(data.alerts || []);
+            renderSecurityState(data);
+            bindSoarButtons();
+          // render recent lines
+          renderRecentLines(data.recent_lines || []);
+          })
+          .catch(() => {
+            statusBadge.classList.remove('success');
+            statusBadge.classList.add('error');
+            statusText.textContent = 'tailer fermo/errore';
+          });
+      }
+
+      // Recent lines UI helpers
+      const recentTableBody = document.getElementById('recentTableBody');
+      const filterAlertsToggle = document.getElementById('filterAlertsToggle');
+      const searchBox = document.getElementById('searchBox');
+      const last60Count = document.getElementById('last60Count');
+      const recentWrap = document.getElementById('recentWrap');
+
+      // active filters set by clicking badges
+      let activeRuleFilter = null;
+      let activeSinkFilter = null;
+
+      // create a small UI pill area for active filters (if not present)
+      (function createFilterPillArea(){
+        if (document.getElementById('activeFilters')) return;
+        const container = document.createElement('div');
+        container.id = 'activeFilters';
+        container.style.marginLeft = '12px';
+        container.style.fontSize = '0.9rem';
+        container.style.color = 'var(--muted)';
+        container.style.display = 'flex';
+        container.style.gap = '8px';
+        const parent = searchBox && searchBox.parentNode ? searchBox.parentNode.parentNode : null;
+        if (parent) parent.appendChild(container);
+      })();
+
+      function updateActiveFiltersUI(){
+        const area = document.getElementById('activeFilters');
+        if (!area) return;
+        area.innerHTML = '';
+        if (activeRuleFilter) {
+          const pill = document.createElement('span');
+          pill.className = 'click-badge';
+          pill.textContent = `Rule: ${activeRuleFilter}`;
+          pill.onclick = () => { activeRuleFilter = null; refresh(); };
+          area.appendChild(pill);
+        }
+        if (activeSinkFilter) {
+          const pill = document.createElement('span');
+          pill.className = 'click-badge';
+          pill.textContent = `Sink: ${activeSinkFilter}`;
+          pill.onclick = () => { activeSinkFilter = null; refresh(); };
+          area.appendChild(pill);
+        }
+        if (!activeRuleFilter && !activeSinkFilter) {
+          area.textContent = '';
+        }
+      }
+
+      function renderRecentLines(lines) {
+        // lines expected in reverse chronological order? our backend appends to deque, we show newest first
+        const now = Date.now();
+        const sixtyAgo = now - 60 * 1000;
+
+        // apply client-side filters
+        const showOnlyAlerts = filterAlertsToggle.checked;
+        const q = (searchBox.value || '').toLowerCase().trim();
+
+        const filtered = (lines || []).slice().reverse().filter((entry) => {
+          // entry has processed_at, matched_parser, raw_line, is_alert
+          if (showOnlyAlerts && !entry.is_alert) return false;
+          if (activeRuleFilter) {
+            if (!entry.matching_rules || !entry.matching_rules.includes(activeRuleFilter)) return false;
+          }
+          if (activeSinkFilter) {
+            if (!entry.alert_sinks || !entry.alert_sinks.includes(activeSinkFilter)) return false;
+          }
+          if (q) {
+            const raw = String(entry.raw_line || entry.raw || entry.message || '').toLowerCase();
+            const proc = String(entry.process || '').toLowerCase();
+            return raw.includes(q) || proc.includes(q);
+          }
+          return true;
+        });
+
+        // count last 60s
+        const count60 = (lines || []).filter(e => {
+          try { return new Date(e.processed_at).getTime() >= sixtyAgo; } catch (e) { return false; }
+        }).length;
+        last60Count.textContent = String(count60);
+
+        // determine if user is scrolled away from top (preserve their position)
+        const preserveScroll = recentWrap.scrollTop > 20;
+        const prevScrollTop = recentWrap.scrollTop;
+
+        // compute average parse duration over filtered (visible) entries
+        const visible = filtered.slice().reverse();
+        let totalDur = 0.0;
+        let durCount = 0;
+        recentTableBody.innerHTML = visible.map((entry) => {
+          const fmt = escapeHtml(entry.matched_parser || entry.format || 'unknown');
+          const parserBadge = fmt === 'unknown' ? '<div class="status-badge" style="padding:4px 8px; border-radius:6px; font-size:0.85rem;">unknown</div>' : `<div class="status-badge success" style="padding:4px 8px; border-radius:6px; font-size:0.85rem;">${fmt}</div>`;
+          const raw = String((entry.raw_line || entry.raw || '') || '');
+          const rawEsc = escapeHtml(raw);
+          const short = rawEsc.length > 80 ? rawEsc.slice(0, 80) + '...' : rawEsc;
+          const alertHtml = entry.is_alert ? '<span style="color:#ef4444;font-weight:700;">ALERT</span>' : '';
+
+          const rules = (entry.matching_rules || []).slice(0, 5);
+          const ruleHtml = rules.map(r => `<span class=\"click-badge\" data-rule=\"${escapeHtml(r)}\">${escapeHtml(r)}</span>`).join(' ');
+          const sinks = (entry.alert_sinks || []).slice(0, 5);
+          const sinkHtml = sinks.map(s => `<span class=\"click-badge\" data-sink=\"${escapeHtml(s)}\">${escapeHtml(s)}</span>`).join(' ');
+
+          const dur = typeof entry.parse_duration_ms === 'number' ? Number(entry.parse_duration_ms) : null;
+          if (dur !== null) { totalDur += dur; durCount += 1; }
+          const threshold = 5.0; // ms
+          const durBadge = dur === null ? '' : `<div style=\"padding:4px 6px; border-radius:6px; background:${dur>threshold? (dur>20? '#fecaca' : '#fde68a') : '#0b1220'}; color: var(--text); font-size:0.85rem; text-align:center;\">${dur.toFixed(2)} ms</div>`;
+
+          // include data attributes for rules and sinks to use on expand
+          const dataRules = (entry.matching_rules || []).map(escapeHtml).join('|');
+          const dataSinks = (entry.alert_sinks || []).map(escapeHtml).join('|');
+          const risk = classifyLog(entry);
+          return `
+            <tr class=\"log-row-${risk.level}\" data-full=\"${rawEsc}\" data-rules=\"${dataRules}\" data-sinks=\"${dataSinks}\">\\n
+              <td>${escapeHtml(entry.processed_at || entry.timestamp || '')}</td>
+              <td>${escapeHtml(entry.source || '(sconosciuta)')}</td>
+              <td>${escapeHtml(entry['source.ip'] || '(n/d)')}</td>
+              <td>${escapeHtml(entry['user.name'] || '(n/d)')}</td>
+              <td>${escapeHtml(entry['host.hostname'] || '(n/d)')}</td>
+              <td>${parserBadge}</td>
+              <td style=\"text-align:center;\">${durBadge}</td>
+              <td class=\"msg-cell\" style=\"max-width:60ch; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;\">${short}<div style=\"margin-top:6px;\">${ruleHtml}</div></td>
+              <td style=\"text-align:center;\"><span class=\"risk-badge risk-${risk.level}\">${risk.label}</span>${alertHtml}<div style=\"margin-top:6px; font-size:0.85rem; color:var(--muted);\">${sinkHtml}</div></td>
+            </tr>
+          `;
+        }).join('');
+        const avgParse = durCount ? (totalDur / durCount) : 0.0;
+        document.getElementById('avgParseDuration').textContent = `${avgParse.toFixed(2)} ms`;
+
+        // restore scroll if needed
+        if (preserveScroll) {
+          recentWrap.scrollTop = prevScrollTop;
+        } else {
+          // keep newest at top
+          recentWrap.scrollTop = 0;
+        }
+
+        // add click to expand and hook badge clicks
+        Array.from(recentTableBody.querySelectorAll('tr')).forEach((tr) => {
+          tr.onclick = () => {
+            const full = tr.getAttribute('data-full') || '';
+            const rulesRaw = tr.getAttribute('data-rules') || '';
+            const sinksRaw = tr.getAttribute('data-sinks') || '';
+            const rules = rulesRaw ? rulesRaw.split('|') : [];
+            const sinks = sinksRaw ? sinksRaw.split('|') : [];
+            // simple expand: toggle a tooltip-like full message row below
+            const next = tr.nextElementSibling;
+            if (next && next.classList && next.classList.contains('full-row')) {
+              next.remove();
+              return;
+            }
+            const row = document.createElement('tr');
+            row.className = 'full-row';
+            const td = document.createElement('td');
+            td.colSpan = 9;
+            td.style.background = 'var(--panel)';
+            td.style.padding = '10px';
+            // build expanded content with raw line, rules and sinks
+            const wrapper = document.createElement('div');
+            wrapper.style.display = 'flex';
+            wrapper.style.flexDirection = 'column';
+            wrapper.style.gap = '8px';
+            const pre = document.createElement('pre');
+            pre.style.margin = '0';
+            pre.style.whiteSpace = 'pre-wrap';
+            pre.style.wordBreak = 'break-all';
+            pre.textContent = full;
+            wrapper.appendChild(pre);
+            if (rules && rules.length) {
+              const rdiv = document.createElement('div');
+              rdiv.style.fontSize = '0.9rem';
+              rdiv.style.color = 'var(--error)';
+              rdiv.textContent = 'Matching rules: ';
+              rules.forEach(r => {
+                const span = document.createElement('span');
+                span.className = 'click-badge';
+                span.style.marginLeft = '8px';
+                span.textContent = r;
+                span.onclick = (ev) => { ev.stopPropagation(); activeRuleFilter = r; refresh(); };
+                rdiv.appendChild(span);
+              });
+              wrapper.appendChild(rdiv);
+            }
+            if (sinks && sinks.length) {
+              const sdiv = document.createElement('div');
+              sdiv.style.fontSize = '0.85rem';
+              sdiv.style.color = 'var(--muted)';
+              sdiv.textContent = 'Alert sinks: ';
+              sinks.forEach(s => {
+                const span = document.createElement('span');
+                span.className = 'click-badge';
+                span.style.marginLeft = '8px';
+                span.textContent = s;
+                span.onclick = (ev) => { ev.stopPropagation(); activeSinkFilter = s; refresh(); };
+                sdiv.appendChild(span);
+              });
+              wrapper.appendChild(sdiv);
+            }
+            td.appendChild(wrapper);
+            row.appendChild(td);
+            tr.parentNode.insertBefore(row, tr.nextSibling);
+            updateActiveFiltersUI();
+          };
+
+          // hook clicks on inline badges (rules/sinks)
+          Array.from(tr.querySelectorAll('.click-badge')).forEach(b => {
+            b.onclick = (ev) => {
+              ev.stopPropagation();
+              const r = b.getAttribute('data-rule');
+              const s = b.getAttribute('data-sink');
+              if (r) { activeRuleFilter = r; activeSinkFilter = null; }
+              if (s) { activeSinkFilter = s; activeRuleFilter = null; }
+              updateActiveFiltersUI();
+              refresh();
+            };
+          });
+        });
+      }
+
+      filterAlertsToggle.addEventListener('change', () => refresh());
+      searchBox.addEventListener('input', () => refresh());
+
+      refresh();
+      setInterval(refresh, 4000);
+      if (window.EventSource) {
+        const events = new EventSource('/api/events');
+        events.addEventListener('snapshot', (event) => {
+          try { renderSecurityState(JSON.parse(event.data)); } catch (error) { /* next poll repairs the view */ }
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,4 @@
+2026-08-20 07:00:00 INFO myapp Started processing id=123 user=alice
+2026-08-20 07:00:01 ERROR myapp Failed to open file /tmp/x: permission denied
+2026-08-20 07:30:00 INFO myapp Demo event id=999 user=carla
+2026-08-20 07:30:02 WARNING myapp Something odd id=1000 user=dave
