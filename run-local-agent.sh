@@ -19,6 +19,10 @@ if [ ! -x "$PROJECT_DIR/.venv/bin/python" ]; then
 	python3 -m venv "$PROJECT_DIR/.venv"
 fi
 PYTHON="$PROJECT_DIR/.venv/bin/python"
+"$PYTHON" -c 'from sentinellogs.bootstrap import ensure_local_secrets; ensure_local_secrets()'
+set -a
+. "$PROJECT_DIR/.sentinellogs/secrets.env"
+set +a
 if ! "$PYTHON" -c 'import requests, psutil' >/dev/null 2>&1; then
 	"$PYTHON" -m pip install --disable-pip-version-check requests psutil
 fi

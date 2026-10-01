@@ -31,7 +31,7 @@ def test_max_line_length_discards_overlong_line() -> None:
 def test_redact_masks_sensitive_values() -> None:
     record = LogRecord(
         format="app",
-        message="User alice@example.com logged in from 10.0.0.5 using 4111111111111111",
+        message="User alice@example.com logged in from 203.0.113.5 using 4111111111111111",
         parsed_at="2026-01-01T00:00:00Z",
     )
     redacted = record.redact([

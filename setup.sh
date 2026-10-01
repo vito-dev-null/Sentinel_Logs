@@ -13,18 +13,23 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
-if [ ! -f .env ]; then
-    cp .env.example .env
-    chmod 600 .env
-    printf '%s\n' "Creato .env da .env.example: inserire i segreti prima del deploy." >&2
+mkdir -p .sentinellogs logs output tls
+if [ ! -f .sentinellogs/secrets.env ]; then
+    python3 -c 'import secrets; print("SENTINELLOGS_BASIC_AUTH=sentinellogs:" + secrets.token_urlsafe(32)); print("SENTINELLOGS_TENANT_TOKENS=local:" + secrets.token_urlsafe(48))' > .sentinellogs/secrets.env
+    chmod 600 .sentinellogs/secrets.env
 fi
-
-mkdir -p tls geoip logs output
 if [ "$#" -ge 2 ]; then
     [ -f "$1" ] || { printf '%s\n' "Certificato non trovato: $1" >&2; exit 1; }
     [ -f "$2" ] || { printf '%s\n' "Chiave TLS non trovata: $2" >&2; exit 1; }
     [ -e tls/tls.crt ] || cp "$1" tls/tls.crt
     [ -e tls/tls.key ] || cp "$2" tls/tls.key
+    chmod 600 tls/tls.key
+fi
+if [ ! -f tls/tls.crt ] || [ ! -f tls/tls.key ]; then
+    command -v openssl >/dev/null 2>&1 || { printf '%s\n' "openssl richiesto per il certificato TLS locale." >&2; exit 1; }
+    openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+        -subj "/CN=sentinellogs" -keyout tls/tls.key -out tls/tls.crt >/dev/null 2>&1
+    cp tls/tls.crt tls/ca.crt
     chmod 600 tls/tls.key
 fi
 

@@ -23,7 +23,7 @@ from .queue import RedisQueue
 from .schema import LogRecord, normalize_security_record
 from .sinks import AlertEngine, BaseSink, create_sink
 from .tailer import LogTailer, journal_lines
-from .telemetry import invia_ping
+from .bootstrap import ensure_local_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +333,7 @@ def _process_live_line(
 
 
 def main(argv: list[str] | None = None) -> int:
-    invia_ping()
+    ensure_local_secrets()
     parser = _build_parser()
     args = parser.parse_args(argv)
 

@@ -4,7 +4,7 @@ set -eu
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PYTHON="$PROJECT_DIR/.venv/bin/python"
 
-mkdir -p "$PROJECT_DIR/output"
+mkdir -p "$PROJECT_DIR/logs"
 LOG_FILE="${SENTINELLOGS_LOG_FILE:-}"
 
 if [ -z "${SENTINELLOGS_BASIC_AUTH:-}" ]; then
@@ -16,6 +16,11 @@ if [ ! -x "$PYTHON" ]; then
     printf '%s\n' "SentinelLogs non e installato. Esegui: $PYTHON -m pip install -e ." >&2
     exit 1
 fi
+
+"$PYTHON" -c 'from sentinellogs.bootstrap import ensure_local_secrets; ensure_local_secrets()'
+set -a
+. "$PROJECT_DIR/.sentinellogs/secrets.env"
+set +a
 
 if [ -n "$LOG_FILE" ] && [ -r "$LOG_FILE" ]; then
     set -- --file "$LOG_FILE"
@@ -41,5 +46,5 @@ fi
 
 exec "$PYTHON" -m sentinellogs \
     "$@" \
-    --sink "file:$PROJECT_DIR/output/parsed.jsonl" \
+    --sink "file:$PROJECT_DIR/logs/parsed.jsonl" \
     --metrics-port 9090

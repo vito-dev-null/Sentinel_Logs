@@ -371,7 +371,10 @@ def create_sink(sink_spec: str) -> BaseSink:
 
     if sink_spec.startswith("file:"):
         target = sink_spec.split(":", 1)[1]
-        return FileSink(target, max_file_size_bytes=None, retention_days=None, max_files=None)
+        max_bytes = int(os.environ.get("SENTINELLOGS_LOG_MAX_BYTES", "10485760"))
+        retention_days = int(os.environ.get("SENTINELLOGS_LOG_RETENTION_DAYS", "7"))
+        max_files = int(os.environ.get("SENTINELLOGS_LOG_MAX_FILES", "5"))
+        return FileSink(target, max_file_size_bytes=max_bytes, retention_days=retention_days, max_files=max_files)
 
     if sink_spec.startswith("webhook:"):
         target = sink_spec.split(":", 1)[1]

@@ -28,15 +28,14 @@ after the health endpoint is ready.
 - Multi-tenant HTTPS ingestion for remote agents
 - ECS-style normalized security fields and MITRE ATT&CK mappings
 - Brute-force correlation and tamper-evident audit hash chain
-- PostgreSQL 16 persistence and Redis 7 asynchronous processing
+- Offline-first JSONL persistence with optional remote integrations disabled by default
 
 ## Storage and queue configuration
 
-The runtime selects storage with `STORAGE_BACKEND=postgres` or `STORAGE_BACKEND=jsonl`.
-PostgreSQL uses `DATABASE_URL` and creates the required tables on startup. JSONL writes
-`logs.jsonl`, `alerts.jsonl`, and `audit_records.jsonl` below `STORAGE_PATH` and is the
-recommended isolated-test fallback. Set `QUEUE_BACKEND=redis` and `REDIS_URL` to enable
-the asynchronous ingestion queue; use `QUEUE_BACKEND=off` for local-only operation.
+The default runtime uses `STORAGE_BACKEND=jsonl`, writes local records below
+`STORAGE_PATH`, and sets `QUEUE_BACKEND=off`. File sinks rotate at the configured size
+and retention limits. Remote queues, webhooks and external notification providers are
+opt-in and must be configured explicitly by the operator.
 
 ## Remote ingestion
 
@@ -142,36 +141,18 @@ and exposes the authenticated dashboard and ingestion service through Nginx. Hos
 ports bind to `127.0.0.1` by default; set `SENTINELLOGS_BIND_ADDRESS=0.0.0.0` only
 when remote access is intentional and protected by a firewall.
 
-For the enterprise Compose stack, first create the local configuration and mount the
-organization's certificate and GeoIP database:
+For a local Compose deployment, run the setup script. It creates ignored local
+secrets, generates a local TLS certificate in a Docker volume, and keeps logs and
+storage isolated from the host filesystem:
 
 ```bash
-cp .env.example .env
-mkdir -p tls geoip
-# Configure SENTINELLOGS_BASIC_AUTH in .env with a strong password (24+ characters).
-# Place tls.crt, tls.key, ca.crt and GeoLite2-City.mmdb in those directories.
+./setup.sh
 docker compose up --build -d
 ```
 
-The stack contains the SentinelLogs backend, PostgreSQL 16, Redis 7, and Nginx. Nginx
-redirects port 80 to 443 and proxies `/v1/ingest` to the backend's TLS listener. The
-certificate may be an internal CA certificate or a Let's Encrypt certificate obtained
-by certbot, for example:
-
-```bash
-sudo certbot certonly --webroot -w ./certbot-webroot -d sentinellogs.example.com
-```
-
-Copy or bind-mount the resulting `fullchain.pem` as `tls/tls.crt` and `privkey.pem` as
-`tls/tls.key`. Set `tls/ca.crt` to the CA certificate that issued the backend
-certificate; Nginx verifies this certificate for its upstream TLS connection. Do not
-expose PostgreSQL or Redis ports publicly.
-
-Set `SENTINELLOGS_TENANT_TOKENS` through a secret manager as a comma-separated mapping
-such as `tenant-a:token-a,tenant-b:token-b`; tokens are never committed to this repo.
-The backend currently keeps parsed events in its configured sinks; PostgreSQL and Redis
-are provisioned as durable infrastructure for the persistence/queue workers that can be
-attached next without changing the ingestion contract.
+The stack contains SentinelLogs and Nginx. Nginx redirects port 80 to 443 and proxies
+`/v1/ingest` to the backend's TLS listener. The first-run bootstrap creates a unique
+Basic Auth credential and tenant token locally; neither is committed or sent externally.
 
 ### Production provider setup
 
@@ -251,8 +232,8 @@ unset SENTINELLOGS_PASSWORD
 The local-agent process must receive the same `SENTINELLOGS_BASIC_AUTH` value in its
 environment.
 
-Telemetry is disabled by default. Setting `SENTINELLOGS_TELEMETRY_URL` explicitly
-enables a request to that endpoint, which can observe the caller's network address.
+Telemetry and crash reporting are not implemented. SentinelLogs makes no telemetry
+requests; external sinks are explicit operator actions, not background services.
 
 ## Alerting
 

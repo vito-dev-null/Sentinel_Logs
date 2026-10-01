@@ -53,10 +53,20 @@ def test_malformed_json_raises_value_error(tmp_path: Path) -> None:
         load_pattern_config(config_path)
 
 
-def test_telemetry_is_disabled_without_explicit_endpoint(monkeypatch) -> None:
-    from sentinellogs import telemetry
+def test_local_secret_bootstrap_is_offline_and_idempotent(tmp_path: Path, monkeypatch) -> None:
+    from sentinellogs.bootstrap import ensure_local_secrets
 
-    monkeypatch.delenv("SENTINELLOGS_TELEMETRY_URL", raising=False)
-    monkeypatch.setattr(telemetry.requests, "get", lambda *args, **kwargs: pytest.fail("unexpected telemetry request"))
+    monkeypatch.setenv("SENTINELLOGS_CONFIG_DIR", str(tmp_path / ".sentinellogs"))
+    monkeypatch.delenv("SENTINELLOGS_BASIC_AUTH", raising=False)
+    monkeypatch.delenv("SENTINELLOGS_TENANT_TOKENS", raising=False)
 
-    telemetry.invia_ping()
+    secret_path = ensure_local_secrets()
+    first = secret_path.read_text(encoding="utf-8")
+    assert secret_path.stat().st_mode & 0o777 == 0o600
+    assert "SENTINELLOGS_BASIC_AUTH=sentinellogs:" in first
+    assert "SENTINELLOGS_TENANT_TOKENS=local:" in first
+
+    secret_path.unlink()
+    ensure_local_secrets()
+    second = secret_path.read_text(encoding="utf-8")
+    assert first != second
