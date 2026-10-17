@@ -3,24 +3,20 @@ set -eu
 
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 PYTHON="$PROJECT_DIR/.venv/bin/python"
+cd "$PROJECT_DIR"
 
 mkdir -p "$PROJECT_DIR/logs"
 LOG_FILE="${SENTINELLOGS_LOG_FILE:-}"
 
-if [ -z "${SENTINELLOGS_BASIC_AUTH:-}" ]; then
-    printf '%s\n' "Impostare SENTINELLOGS_BASIC_AUTH (utente:password di almeno 24 caratteri) prima di avviare SentinelLogs." >&2
-    exit 1
-fi
-
-if [ ! -x "$PYTHON" ]; then
-    printf '%s\n' "SentinelLogs non e installato. Esegui: $PYTHON -m pip install -e ." >&2
-    exit 1
-fi
-
-"$PYTHON" -c 'from sentinellogs.bootstrap import ensure_local_secrets; ensure_local_secrets()'
+"$PROJECT_DIR/prepare-local-runtime.sh"
 set -a
 . "$PROJECT_DIR/.sentinellogs/secrets.env"
 set +a
+
+if [ -z "${SENTINELLOGS_BASIC_AUTH:-}" ]; then
+    printf '%s\n' "Credenziali locali non disponibili in .sentinellogs/secrets.env." >&2
+    exit 1
+fi
 
 if [ -n "$LOG_FILE" ] && [ -r "$LOG_FILE" ]; then
     set -- --file "$LOG_FILE"

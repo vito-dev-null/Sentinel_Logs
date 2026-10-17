@@ -53,7 +53,7 @@ from sentinellogs.ingestion import send_events
 
 send_events(
   "https://sentinellogs.example.com",
-  token="REDACTED_SECRET",
+  token="YOUR_TENANT_TOKEN_HERE",
   agent_id="server-001",
   events=[{"source_type": "windows_eventlog_security", "message": "..."}],
 )
@@ -176,7 +176,7 @@ From a lab agent, send real, approved test records over the public HTTPS endpoin
 from sentinellogs.ingestion import send_events
 send_events(
   "https://sentinellogs.example.com",
-  token="REDACTED_SECRET",
+  token="YOUR_TENANT_TOKEN_HERE",
   agent_id="lab-server-001",
   events=[{"source_type": "linux_auth", "raw": "...approved lab log..."}],
 )
@@ -298,7 +298,7 @@ sentinellogs --file /var/log/auth.log --sink "webhook:${WEBHOOK_URL}"
 ## SentinelLogs ingest sink
 
 ```bash
-export SENTINEL_API_KEY="REDACTED_SECRET"
+SENTINEL_API_KEY"REDACTED_SECRET"
 sentinellogs --file /var/log/app.log --sink sentinellogs:https://sentinel.example.com/ingest
 ```
 

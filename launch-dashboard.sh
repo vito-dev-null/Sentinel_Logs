@@ -8,19 +8,23 @@ BACKEND_LOG="$LOG_DIR/backend.log"
 AGENT_LOG="$LOG_DIR/agent.log"
 URL="http://127.0.0.1:9090/dashboard"
 
-if [ -z "${SENTINELLOGS_BASIC_AUTH:-}" ]; then
-    printf '%s\n' "Impostare SENTINELLOGS_BASIC_AUTH prima di avviare la dashboard." >&2
-    exit 1
-fi
-
 health_check() {
     "$PYTHON" -c 'import base64, os, urllib.request; credentials=os.environ["SENTINELLOGS_BASIC_AUTH"].encode(); request=urllib.request.Request("http://127.0.0.1:9090/health", headers={"Authorization": "Basic "+base64.b64encode(credentials).decode()}); urllib.request.urlopen(request, timeout=1)' >/dev/null 2>&1
 }
 
 mkdir -p "$LOG_DIR"
 
-if ! command -v python3 >/dev/null 2>&1 || [ ! -x "$PYTHON" ]; then
-    printf '%s\n' "SentinelLogs non installato: eseguire prima ./run-local-agent.sh" >&2
+if ! "$PROJECT_DIR/prepare-local-runtime.sh" >>"$BACKEND_LOG" 2>&1; then
+    printf '%s\n' "Preparazione SentinelLogs non riuscita. Consultare $BACKEND_LOG" >&2
+    exit 1
+fi
+
+cd "$PROJECT_DIR"
+set -a
+. "$PROJECT_DIR/.sentinellogs/secrets.env"
+set +a
+if [ -z "${SENTINELLOGS_BASIC_AUTH:-}" ]; then
+    printf '%s\n' "Credenziali locali non disponibili in .sentinellogs/secrets.env." >&2
     exit 1
 fi
 

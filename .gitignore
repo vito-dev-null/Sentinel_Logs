@@ -21,9 +21,15 @@ logs/
 .env
 .env.*
 !.env.example
-.sentinellogs/
+.idea/
+.REDACTED_SECRET/
 tls/
 geoip/
 *.pem
 *.key
 *.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+\n# runtime secrets and local runtime state\n.sentinellogs/
