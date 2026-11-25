@@ -15,12 +15,25 @@ The security-themed desktop launcher is `sentinellogs.desktop` and uses
 `assets/sentinellogs-security.svg`. Run `./setup.sh` to install it in the current user's
 application menu; double-clicking it starts the backend and opens the dashboard only
 after the health endpoint is ready.
+The launcher opens the dashboard through a loopback-only proxy, which supplies the
+backend's Basic Auth credentials without showing a browser login prompt. The metrics
+backend remains authenticated and bound to `127.0.0.1`; the proxy is not for remote access.
+
+For a workstation that should display a central SentinelLogs instance, an operator can
+enable central-dashboard mode with the ignored local marker
+`.sentinellogs/central-dashboard-mode` and a user-level systemd tunnel named
+`sentinellogs-central-dashboard-tunnel.service`. The tunnel must forward loopback port
+`19090` to the central host's loopback port `19090`; use an SSH host alias from the
+operator's SSH configuration rather than placing host-specific values or credentials
+in this repository. In this mode the launcher verifies that the remote history index is
+available before opening the dashboard and fails closed instead of silently showing
+the local, incomplete view.
 
 ## Features
 
 - Follow appended log lines with logrotate-safe truncation handling
 - Regex parsers for syslog and application logs
-- Automatic IPv4 extraction from messages
+- Validated IPv4 and IPv6 extraction from parsed and structured messages
 - JSONL output to stdout, files, HTTP webhooks, syslog, or a SentinelLogs ingest endpoint
 - YAML-driven alert rules
 - Prometheus metrics, health checks, and an optional live dashboard
@@ -33,9 +46,15 @@ after the health endpoint is ready.
 ## Storage and queue configuration
 
 The default runtime uses `STORAGE_BACKEND=jsonl`, writes local records below
-`STORAGE_PATH`, and sets `QUEUE_BACKEND=off`. File sinks rotate at the configured size
-and retention limits. Remote queues, webhooks and external notification providers are
-opt-in and must be configured explicitly by the operator.
+`STORAGE_PATH`, and sets `QUEUE_BACKEND=off`. The JSONL event store appends to its
+log, alert, and audit files without automatic expiry; plan disk capacity, backups,
+and any archival or deletion policy explicitly. A separate `file:` sink uses
+`SENTINELLOGS_LOG_MAX_BYTES`, `SENTINELLOGS_LOG_RETENTION_DAYS`, and
+`SENTINELLOGS_LOG_MAX_FILES`. The file-count limit is an additional cap and can
+shorten the age-based retention window if it is too low for the event volume. Docker
+Compose examples default to 7 days and 5 files; configure both values for the target
+retention period and measured rotation rate. Remote queues, webhooks, and external
+notification providers are opt-in and must be configured explicitly by the operator.
 
 ## Remote ingestion
 
@@ -44,16 +63,42 @@ Monitor exporters, or a proprietary agent can send an authenticated JSON envelop
 `POST /v1/ingest`. The backend requires TLS, a tenant-scoped Bearer token, and an
 `X-Sentinel-Agent` header. Supported `source_type` values are `linux_auth`, `journald`,
 `windows_eventlog_security`, `windows_sysmon`, `aws_cloudtrail`, `azure_monitor`,
-`network_syslog`, and `generic`.
+`network_syslog`, `google_workspace_login`, `google_account_activity`, and `generic`.
+
+## Google activity exports
+
+The existing local agent also watches the ignored `google-activity/` folder, or the
+directory configured by `SENTINELLOGS_GOOGLE_ACTIVITY_DIR`. It scans every 30 seconds
+and sends normalized events through the same authenticated ingestion endpoint as node
+logs. Supported inputs are Google Workspace Admin Reports API activity JSON responses
+(`items` with `actor`, `id`, and `events`), Google Takeout My Activity JSON arrays, and
+newline-delimited JSON/JSONL containing those records. A private hash-only checkpoint
+prevents already imported export records from being sent again after restart.
+
+Workspace login events are normalized with timestamp, account, outcome, and source IP
+when the export provides them. Explicit suspicious-login events alert immediately;
+failed logins are correlated to avoid alerting on every typo. Successful logins from
+outside expected networks alert only when the backend has
+`SENTINELLOGS_TRUSTED_LOGIN_CIDRS` configured as a comma-separated list of trusted
+CIDRs. Leave it unset until the expected networks are known. General Takeout activity
+is recorded as account activity, not mislabeled as a successful login, and does not
+generate authentication alerts.
+
+This is file-based collection, not a live Google connector. Workspace login audit
+events must first be exported by an operator or an authorized Reports API collector.
+For consumer Google accounts, Takeout My Activity can describe product activity but
+does not provide a complete login/session audit; those account-security events remain
+unavailable unless Google provides an explicit export for them.
 
 The Python client can be used by a lightweight agent:
 
 ```python
+import os
 from sentinellogs.ingestion import send_events
 
 send_events(
   "https://sentinellogs.example.com",
-  token="YOUR_TENANT_TOKEN_HERE",
+  token=os.environ["SENTINELLOGS_TENANT_TOKEN"],
   agent_id="server-001",
   events=[{"source_type": "windows_eventlog_security", "message": "..."}],
 )
@@ -63,16 +108,46 @@ Start the HTTPS listener from Python with `start_ingestion_server(...)`, providi
 certificate, private key, and a mapping of tenant IDs to tokens. Tokens are compared
 in constant time; never place them in source control. Structured events retain their
 original fields and are not accepted when they contain neither a raw line nor a message.
+When `source.ip` is omitted, SentinelLogs uses the first valid IP address found in the
+event message; if no address is present, it leaves `source.ip` unset rather than
+substituting the collector's own address. The local agent follows this rule; its
+optional `source_ip` override is only for deployments that explicitly need a fixed
+source address. Supply `source.ip` explicitly when an event contains multiple
+addresses and the source must be unambiguous.
+
+Remote ingestion is disabled by default and binds to `127.0.0.1` unless an address is
+explicitly configured. For a private Tailscale deployment, bind the HTTPS listener to
+the server's Tailscale IP, use a certificate valid for its MagicDNS name, and restrict
+tailnet access with ACLs. Do not expose the dashboard's port `9090` to remote agents.
+The native launcher enables the listener only when `SENTINELLOGS_INGESTION_PORT`,
+`SENTINELLOGS_INGESTION_HOST`, `SENTINELLOGS_INGESTION_CERTFILE`, and
+`SENTINELLOGS_INGESTION_KEYFILE` are set and `SENTINELLOGS_TENANT_TOKENS` contains
+at least one tenant-scoped Bearer token.
+
+`LocalLogAgent` can send to that listener with `SENTINELLOGS_INGEST_TOKEN` and
+`SENTINELLOGS_AGENT_ENDPOINT=https://<server>:9443`. Bearer credentials are refused
+over HTTP. For a private CA or pinned certificate, set
+`SENTINELLOGS_INGEST_CA_FILE` to the trusted certificate path on the agent.
+The agent starts at the end of each log file and forwards only new lines; historical
+replay is opt-in with `SENTINELLOGS_AGENT_FROM_START=true`.
 
 ## Normalization and detection
 
 Accepted events expose ECS-style fields including `source.ip`, `user.name`,
 `event.action`, and `event.outcome`, together with `tenant_id`, `agent_id`, and
 `source_type`. Failed authentication is mapped to MITRE ATT&CK `T1110`; unexpected
-sudo usage can be mapped to `T1548.003`. `CorrelationEngine` raises a brute-force alert
-Protect it with mandatory HTTP Basic Auth. The service refuses to start without a
-password of at least 24 characters:
-accepted events to a SHA-256 hash chain and verify it with `AuditLog.verify()`.
+sudo usage can be mapped to `T1548.003`. `CorrelationEngine` raises a brute-force alert when failures exceed the configured
+threshold. Protect the dashboard with mandatory HTTP Basic Auth; the service refuses
+to start without a password of at least 24 characters.
+The default fail2ban rule matches the `Ban` action only; discovery (`Found`) and
+unban (`Unban`) records are not treated as bans.
+
+Accepted events are appended to a SHA-256 hash chain. The native launcher writes the
+chain to `logs/audit.jsonl` by default; override the location with
+`SENTINELLOGS_AUDIT_LOG`. The dashboard reports integrity as verified only after the
+chain contains a valid record. Missing, empty, or corrupted history remains
+unverified and is never repaired automatically; use `AuditLog.verify()` to check
+the chain.
 
 ## Enterprise access, response and notifications
 
@@ -129,6 +204,8 @@ docker run --rm -it \
 Compose:
 
 ```bash
+cp .env.example .env
+# Edit .env with a non-overlapping IPv4 subnet and distinct container addresses.
 docker compose up --build
 ```
 
@@ -137,13 +214,19 @@ The included `docker-compose.yml` mounts:
 - `./logs:/var/log/app:ro`
 - `./output:/var/log/output`
 
-and exposes the authenticated dashboard and ingestion service through Nginx. Host
-ports bind to `127.0.0.1` by default; set `SENTINELLOGS_BIND_ADDRESS=0.0.0.0` only
-when remote access is intentional and protected by a firewall.
+and exposes the authenticated dashboard and ingestion service through Nginx. It uses
+an explicitly configured bridge subnet and fixed backend/Nginx container addresses;
+the application and proxy bind only to those addresses. Published host ports are fixed
+to loopback. The ignored `.env` file must contain `SENTINELLOGS_DOCKER_SUBNET`,
+`SENTINELLOGS_BACKEND_CONTAINER_ADDRESS`, and
+`SENTINELLOGS_NGINX_CONTAINER_ADDRESS`, with non-overlapping, distinct addresses
+assigned from the selected subnet. Never commit the local `.env` file.
 
-For a local Compose deployment, run the setup script. It creates ignored local
-secrets, generates a local TLS certificate in a Docker volume, and keeps logs and
-storage isolated from the host filesystem:
+The commands above copy the public configuration template and start the bridge stack;
+edit `.env` first to replace all placeholders with an unused subnet and addresses
+assigned to the two containers. The setup script creates ignored local secrets,
+generates a local TLS certificate in a Docker volume, and keeps logs and storage
+isolated from the host filesystem:
 
 ```bash
 ./setup.sh
@@ -173,19 +256,26 @@ secret store; `.env.example` contains names only.
 From a lab agent, send real, approved test records over the public HTTPS endpoint:
 
 ```python
+import os
 from sentinellogs.ingestion import send_events
 send_events(
   "https://sentinellogs.example.com",
-  token="YOUR_TENANT_TOKEN_HERE",
+  token=os.environ["SENTINELLOGS_TENANT_TOKEN"],
   agent_id="lab-server-001",
   events=[{"source_type": "linux_auth", "raw": "...approved lab log..."}],
 )
 ```
 
-Use `CorrelationEngine` tests for brute force and impossible travel before enabling a
-production SOAR callback. Real firewall isolation, webhook delivery, certificate
-issuance, and lab-agent deployment require access to the organization's network and
-credentials and are intentionally not run by this repository's tests.
+Use `CorrelationEngine` tests for brute force and impossible travel; SentinelLogs
+does not enable live SOAR actions. The dashboard's IP-block request is wired to a
+dry-run handler: it validates the address and records that a simulation was
+requested, but never changes firewall or network state. Successful SSH logins,
+generic `sudo` commands, and an external source address alone are informational and
+do not trigger dashboard alerts; explicit security rules such as failed logins and
+fail2ban actions remain visible. Real firewall isolation is not implemented by the
+dashboard. Webhook delivery, certificate issuance, and lab-agent deployment require
+access to an organization's network and credentials and are intentionally not run
+by this repository's tests.
 
 ## Observability
 
@@ -217,8 +307,10 @@ sentinellogs --file /var/log/auth.log --metrics-port 9090
 Then open `http://localhost:9090/dashboard`.
 
 Basic authentication is mandatory for the dashboard, APIs, and metrics. The server
-binds to `127.0.0.1` by default. Use `--metrics-host 0.0.0.0` only behind a trusted
-TLS reverse proxy. Use a unique password of at least 24 characters:
+binds to `127.0.0.1` by default. Bind addresses are validated and unspecified
+addresses are rejected unless `--allow-wildcard-bind` is explicitly supplied; use
+that opt-in only behind an enforced network boundary. Use a unique password of at
+least 24 characters:
 
 Protect it with HTTP basic auth before exposing it on a shared network:
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import asin, cos, radians, sin, sqrt
-from typing import Callable, Protocol
+from typing import Callable, Protocol, Sequence
 
 from .schema import LogRecord
 
@@ -67,17 +68,54 @@ def _event_time(record: LogRecord) -> float:
 
 
 class CorrelationEngine:
-    def __init__(self, *, threshold: int = 10, window_seconds: int = 60, admin_users: set[str] | None = None, geoip: GeoIPProvider | None = None, impossible_speed_kmh: float = 900.0) -> None:
+    def __init__(
+        self,
+        *,
+        threshold: int = 10,
+        window_seconds: int = 60,
+        admin_users: set[str] | None = None,
+        geoip: GeoIPProvider | None = None,
+        impossible_speed_kmh: float = 900.0,
+        trusted_login_cidrs: Sequence[str] | None = None,
+    ) -> None:
         self.threshold = threshold
         self.window_seconds = window_seconds
         self.admin_users = {user.lower() for user in (admin_users or set())}
         self._failed_logins: dict[tuple[str | None, str], deque[float]] = defaultdict(deque)
         self.geoip = geoip
         self.impossible_speed_kmh = impossible_speed_kmh
+        try:
+            self.trusted_login_networks = tuple(
+                ipaddress.ip_network(cidr, strict=False)
+                for cidr in (trusted_login_cidrs or [])
+            )
+        except ValueError as exc:
+            raise ValueError("Invalid trusted login CIDR configuration") from exc
         self._last_logins: dict[tuple[str | None, str], tuple[float, str, tuple[float, float]]] = {}
 
     def observe(self, record: LogRecord) -> list[SecurityAlert]:
         alerts: list[SecurityAlert] = []
+        if (
+            record.event_action == "authentication"
+            and record.event_outcome == "success"
+            and record.source_ip
+            and self.trusted_login_networks
+        ):
+            try:
+                source_address = ipaddress.ip_address(record.source_ip)
+            except ValueError:
+                source_address = None
+            if source_address is None or not any(source_address in network for network in self.trusted_login_networks):
+                alerts.append(SecurityAlert(
+                    rule_id="untrusted-login-source",
+                    title="Successful authentication from an untrusted source",
+                    severity="high",
+                    message="A successful authentication came from an IP outside the configured trusted networks",
+                    tenant_id=record.tenant_id,
+                    source_ip=record.source_ip if source_address is not None else None,
+                    mitre_technique="T1078",
+                    details={"source_type": record.source_type},
+                ))
         if record.event_action == "authentication" and record.event_outcome == "success" and record.user_name and record.source_ip and self.geoip:
             location = self.geoip.locate(record.source_ip)
             if location is not None:
@@ -111,9 +149,9 @@ class CorrelationEngine:
             if len(events) == self.threshold + 1:
                 alerts.append(SecurityAlert(
                     rule_id="brute-force-ssh",
-                    title="Possible SSH brute force",
+                    title="Possible authentication brute force",
                     severity="high",
-                    message=f"{len(events)} failed authentication attempts from {record.source_ip} in {self.window_seconds}s",
+                    message=f"{len(events)} failed authentication attempts from a single IP in {self.window_seconds}s",
                     tenant_id=record.tenant_id,
                     source_ip=record.source_ip,
                     mitre_technique="T1110",

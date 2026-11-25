@@ -37,9 +37,11 @@ services:
       - --metrics-port
       - "9090"
       - --metrics-host
-      - 0.0.0.0
+      - ${SENTINELLOGS_BACKEND_CONTAINER_ADDRESS:?Set a backend address in the ignored .env file}
       - --ingestion-port
       - "9443"
+      - --ingestion-host
+      - ${SENTINELLOGS_BACKEND_CONTAINER_ADDRESS:?Set a backend address in the ignored .env file}
       - --ingestion-certfile
       - /app/tls/tls.crt
       - --ingestion-keyfile
@@ -58,6 +60,7 @@ services:
       tls-init:
         condition: service_completed_successfully
     environment:
+      SENTINELLOGS_BACKEND_BIND_ADDRESS: ${SENTINELLOGS_BACKEND_CONTAINER_ADDRESS:?Set a backend address in the ignored .env file}
       STORAGE_BACKEND: jsonl
       STORAGE_PATH: ${STORAGE_PATH:-/var/log/output}
       QUEUE_BACKEND: off
@@ -65,11 +68,14 @@ services:
       SENTINELLOGS_LOG_RETENTION_DAYS: ${SENTINELLOGS_LOG_RETENTION_DAYS:-7}
       SENTINELLOGS_LOG_MAX_FILES: ${SENTINELLOGS_LOG_MAX_FILES:-5}
     healthcheck:
-      test: ["CMD", "python", "-c", "import base64, os, urllib.request; credentials=os.environ['SENTINELLOGS_BASIC_AUTH'].encode(); request=urllib.request.Request('http://127.0.0.1:9090/health', headers={'Authorization': 'Basic '+base64.b64encode(credentials).decode()}); urllib.request.urlopen(request)"]
+      test: ["CMD", "python", "-c", "import base64, os, urllib.request; credentials=os.environ['SENTINELLOGS_BASIC_AUTH'].encode(); address=os.environ['SENTINELLOGS_BACKEND_BIND_ADDRESS']; request=urllib.request.Request('http://'+address+':9090/health', headers={'Authorization': 'Basic '+base64.b64encode(credentials).decode()}); urllib.request.urlopen(request)"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      default:
+        ipv4_address: ${SENTINELLOGS_BACKEND_CONTAINER_ADDRESS:?Set a backend address in the ignored .env file}
 
   nginx:
     image: nginx:1.27-alpine
@@ -77,13 +83,26 @@ services:
       sentinellogs:
         condition: service_started
     ports:
-      - "${SENTINELLOGS_BIND_ADDRESS:-127.0.0.1}:80:80"
-      - "${SENTINELLOGS_BIND_ADDRESS:-127.0.0.1}:443:443"
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
+      - ./nginx/entrypoint.sh:/sentinellogs-nginx-entrypoint.sh:ro
       - app_tls:/etc/nginx/tls:ro
+    environment:
+      SENTINELLOGS_NGINX_BIND_ADDRESS: ${SENTINELLOGS_NGINX_CONTAINER_ADDRESS:?Set an Nginx address in the ignored .env file}
+    entrypoint: ["/bin/sh", "/sentinellogs-nginx-entrypoint.sh"]
+    networks:
+      default:
+        ipv4_address: ${SENTINELLOGS_NGINX_CONTAINER_ADDRESS:?Set an Nginx address in the ignored .env file}
 
 volumes:
   app_logs:
   app_output:
   app_tls:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${SENTINELLOGS_DOCKER_SUBNET:?Set a non-overlapping IPv4 subnet in the ignored .env file}

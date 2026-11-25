@@ -9,7 +9,8 @@ from threading import Thread
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
-from .parsers import ParserRegistry
+from .network import validate_bind_host
+from .parsers import ParserRegistry, extract_ips
 from .schema import LogRecord, normalize_security_record
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ SUPPORTED_SOURCE_TYPES = frozenset({
     "aws_cloudtrail",
     "azure_monitor",
     "network_syslog",
+    "google_workspace_login",
+    "google_account_activity",
     "generic",
 })
 
@@ -51,10 +54,12 @@ def _record_from_event(event: dict[str, Any], registry: ParserRegistry) -> LogRe
         if record is not None and record.format == "unknown":
             record = None
     if record is None and isinstance(event.get("message"), str):
+        message = event["message"]
         record = LogRecord(
             format=str(event.get("format") or event.get("source_type") or "structured"),
             timestamp=event.get("timestamp"),
-            message=event["message"],
+            message=message,
+            ips=extract_ips(message),
             raw=event.get("raw"),
             raw_line=event.get("raw"),
         )
@@ -148,15 +153,17 @@ def start_ingestion_server(
     registry: ParserRegistry,
     on_record: Callable[[LogRecord], None],
     *,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 9443,
     tenant_tokens: dict[str, str],
     certfile: str,
     keyfile: str,
     max_payload_bytes: int = 5_000_000,
+    allow_wildcard: bool = False,
 ) -> ThreadingHTTPServer:
     if not tenant_tokens:
         raise ValueError("At least one tenant token is required")
+    host = validate_bind_host(host, allow_wildcard=allow_wildcard)
     server = ThreadingHTTPServer((host, port), IngestionHandler)
     server.tenant_tokens = dict(tenant_tokens)  # type: ignore[attr-defined]
     server.max_payload_bytes = max_payload_bytes  # type: ignore[attr-defined]

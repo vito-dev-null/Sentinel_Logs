@@ -4,7 +4,10 @@ import json
 import urllib.request
 from urllib.error import HTTPError
 
+import pytest
+
 from sentinellogs.metrics import MetricsRegistry, start_metrics_server
+from sentinellogs.soar import dry_run_block_ip
 
 
 def test_metrics_registry_tracks_data() -> None:
@@ -50,6 +53,72 @@ def test_metrics_server_rejects_weak_password(monkeypatch) -> None:
         assert "at least 24 characters" in str(error)
     else:
         raise AssertionError("metrics server started with a weak password")
+
+
+def test_metrics_server_rejects_unspecified_bind_without_opt_in(monkeypatch) -> None:
+    monkeypatch.setenv("SENTINELLOGS_BASIC_AUTH", "test-user:a-strong-test-password-1234")
+
+    with pytest.raises(ValueError, match="explicit opt-in"):
+        start_metrics_server(MetricsRegistry(), 0, host="0.0.0.0")
+
+
+def test_metrics_server_rejects_unspecified_ingestion_bind_without_opt_in() -> None:
+    from sentinellogs.ingestion import start_ingestion_server
+    from sentinellogs.parsers import ParserRegistry
+
+    with pytest.raises(ValueError, match="explicit opt-in"):
+        start_ingestion_server(
+            ParserRegistry(),
+            lambda record: None,
+            host="::",
+            port=0,
+            tenant_tokens={"tenant": "token"},
+            certfile="not-loaded-before-bind-check",
+            keyfile="not-loaded-before-bind-check",
+        )
+
+
+def test_bind_validation_allows_unspecified_address_only_with_opt_in() -> None:
+    from sentinellogs.network import validate_bind_host
+
+    assert validate_bind_host("127.0.0.1") == "127.0.0.1"
+    assert validate_bind_host("0.0.0.0", allow_wildcard=True) == "0.0.0.0"
+
+
+def test_soar_block_ip_endpoint_is_dry_run_and_validates_ip(monkeypatch) -> None:
+    monkeypatch.setenv("SENTINELLOGS_BASIC_AUTH", "test-user:a-strong-test-password-1234")
+    server = start_metrics_server(MetricsRegistry(), 0, soar_action=dry_run_block_ip)
+    port = server.server_address[1]
+    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, f"http://127.0.0.1:{port}/", "test-user", "a-strong-test-password-1234")
+    opener = urllib.request.build_opener(urllib.request.HTTPBasicAuthHandler(password_manager))
+
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/soar/block-ip",
+            data=json.dumps({"ip": "198.51.100.42"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with opener.open(request, timeout=5) as response:
+            assert response.status == 202
+            assert json.loads(response.read().decode("utf-8")) == {"status": "dry-run"}
+
+        invalid_request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/soar/block-ip",
+            data=json.dumps({"ip": "not-an-ip"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            opener.open(invalid_request, timeout=5)
+        except HTTPError as error:
+            assert error.code == 400
+        else:
+            raise AssertionError("invalid IP was accepted by SOAR endpoint")
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_dashboard_and_metrics_api(monkeypatch) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_LINE_LENGTH = 100_000
 DEFAULT_PARSE_TIMEOUT_MS = 500
+IP_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_.])(?:\[[0-9A-Za-z:.%_-]+\](?::\d+)?|[0-9A-Za-z:.%_-]+)(?![A-Za-z0-9_.])")
+IPV4_WITH_PORT_RE = re.compile(r"((?:\d{1,3}\.){3}\d{1,3}):\d+")
 
 
 def utc_now_iso() -> str:
@@ -62,7 +65,25 @@ def normalize_timestamp_to_iso(ts: str | None) -> str | None:
 
 
 def extract_ips(message: str) -> list[str]:
-    return re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", message)
+    addresses: list[str] = []
+    for candidate in IP_TOKEN_RE.findall(message):
+        address = candidate
+        if candidate.startswith("["):
+            address = candidate[1:candidate.index("]")]
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError:
+            match = IPV4_WITH_PORT_RE.fullmatch(candidate)
+            if match is None:
+                continue
+            try:
+                parsed = ipaddress.ip_address(match.group(1))
+            except ValueError:
+                continue
+        normalized = parsed.compressed
+        if normalized not in addresses:
+            addresses.append(normalized)
+    return addresses
 
 
 def sha256_file(path: Path) -> str:

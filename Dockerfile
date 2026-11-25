@@ -25,7 +25,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN groupadd --system --gid 10001 appgroup && useradd --system --uid 10001 --gid appgroup --create-home --home-dir /home/appuser appuser \
+RUN groupadd --system --gid 10001 appgroup && useradd --system --uid 10001 --gid appgroup --create-home --home-dir /var/lib/sentinellogs appuser \
       && mkdir -p /var/lib/sentinellogs \
       && chown appuser:appgroup /var/lib/sentinellogs
 COPY --from=builder /opt/venv /opt/venv

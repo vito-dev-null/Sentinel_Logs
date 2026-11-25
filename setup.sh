@@ -12,6 +12,14 @@ if ! docker compose version >/dev/null 2>&1; then
     printf '%s\n' "Docker Compose Plugin non trovato." >&2
     exit 1
 fi
+if [ ! -f .env ]; then
+    printf '%s\n' "Configurazione Compose assente. Copiare .env.example in .env e impostare subnet e indirizzi container non sovrapposti." >&2
+    exit 1
+fi
+if grep -Eq 'replace-with-' .env; then
+    printf '%s\n' "Configurazione Compose incompleta: sostituire i segnaposto in .env." >&2
+    exit 1
+fi
 
 mkdir -p .sentinellogs logs output tls
 if [ ! -f .sentinellogs/secrets.env ]; then
@@ -33,9 +41,10 @@ if [ ! -f tls/tls.crt ] || [ ! -f tls/tls.key ]; then
     chmod 600 tls/tls.key
 fi
 
-docker compose pull postgres redis nginx
+docker compose pull nginx
 docker compose build sentinellogs
 chmod +x "$PROJECT_DIR/launch-dashboard.sh"
+chmod +x "$PROJECT_DIR/prepare-local-runtime.sh"
 mkdir -p "$HOME/.local/share/applications"
 escaped_project_dir=$(printf '%s\n' "$PROJECT_DIR" | sed 's/[\\&|]/\\&/g')
 sed "s|@PROJECT_DIR@|$escaped_project_dir|g" "$PROJECT_DIR/sentinellogs.desktop" > "$HOME/.local/share/applications/sentinellogs.desktop"

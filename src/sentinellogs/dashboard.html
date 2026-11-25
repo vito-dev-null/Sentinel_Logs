@@ -19,6 +19,12 @@
         --muted-panel: #0b1220;
       }
 
+      html {
+        color-scheme: dark;
+        scrollbar-color: #a3a3a3 #0b1115;
+        scrollbar-width: thin;
+      }
+
       * { box-sizing: border-box; }
 
       body {
@@ -160,11 +166,29 @@
 
       .log-row-critical { background: #3a0b10; border-left: 4px solid #ff1e27; color: #fff1f2; }
       .log-row-warning { background: #4a2500; border-left: 4px solid #ff8c00; color: #fff7ed; }
-      .log-row-neutral { background: rgba(22, 163, 74, 0.08); border-left: 4px solid #16a34a; }
+      .log-row-neutral { background: #123321; border-left: 4px solid #22c55e; color: #e4ffe9; }
       .risk-badge { display: inline-block; margin-right: 6px; padding: 3px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
       .risk-critical { background: #ff1e27; color: #fff; }
       .risk-warning { background: #ff8c00; color: #1f1200; }
       .risk-neutral { background: #16a34a; color: #fff; }
+
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #0b1115;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #a3a3a3;
+        border-radius: 5px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #c5c9cc;
+      }
 
       @media (max-width: 640px) {
         body {
@@ -182,6 +206,112 @@
 
         .value {
           font-size: 1.5rem;
+        }
+      }
+
+      .workspace-view {
+        padding: 10px;
+      }
+
+      .workspace-view .container {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        max-width: none;
+        align-items: start;
+      }
+
+      .workspace-view .header {
+        grid-column: 1;
+        margin-bottom: 2px;
+      }
+
+      .workspace-view .title {
+        font-size: 1.25rem;
+      }
+
+      .workspace-view .cards {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 0;
+      }
+
+      .workspace-view .container > .cards:nth-child(2) {
+        grid-column: 1;
+        grid-row: 2;
+      }
+
+      .workspace-view .card,
+      .workspace-view .panel {
+        min-width: 0;
+        padding: 10px;
+      }
+
+      .workspace-view .value {
+        margin-top: 6px;
+        font-size: 1.4rem;
+        overflow-wrap: anywhere;
+      }
+
+      .workspace-view .chart-box {
+        height: 150px;
+      }
+
+      .workspace-view .container > .cards:nth-child(3) {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .workspace-view .container > .panel:nth-child(6) {
+        grid-column: 1;
+        grid-row: 3;
+        width: 100%;
+        margin-bottom: 0 !important;
+      }
+
+      .workspace-view #recentWrap {
+        height: calc(100vh - 200px);
+        min-height: 420px;
+        max-height: none !important;
+      }
+
+      .workspace-view #recentWrap table {
+        min-width: 0;
+        table-layout: fixed;
+      }
+
+      .workspace-view #recentWrap th,
+      .workspace-view #recentWrap td {
+        padding: 7px 5px;
+        font-size: 0.78rem;
+        overflow-wrap: anywhere;
+      }
+
+      .workspace-view #recentWrap th:nth-child(1) { width: 12% !important; }
+      .workspace-view #recentWrap th:nth-child(2) { width: 10% !important; }
+      .workspace-view #recentWrap th:nth-child(3) { width: 10% !important; }
+      .workspace-view #recentWrap th:nth-child(4) { width: 8% !important; }
+      .workspace-view #recentWrap th:nth-child(5) { width: 9% !important; }
+      .workspace-view #recentWrap th:nth-child(6) { width: 9% !important; }
+      .workspace-view #recentWrap th:nth-child(7) { width: 9% !important; }
+      .workspace-view #recentWrap th:nth-child(8) { width: 27% !important; }
+      .workspace-view #recentWrap th:nth-child(9) { width: 6% !important; }
+
+      .workspace-view .container > .panel:nth-child(6) > div[style*="display:flex"] {
+        flex-wrap: wrap;
+      }
+
+      @media (max-width: 900px) {
+        .workspace-view .cards {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .workspace-view .container > .cards:nth-child(3) {
+          grid-template-columns: 1fr;
+        }
+
+        .workspace-view #recentWrap {
+          height: calc(100vh - 240px);
+          min-height: 320px;
         }
       }
     </style>
@@ -225,8 +355,8 @@
       </div>
 
       <div class="panel" style="margin-bottom: 24px;">
-        <h3 style="margin: 0 0 12px; font-size: 1rem;">Impossible Travel / SOAR</h3>
-        <div id="travelIndicators">Nessun evento impossible travel.</div>
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Viaggio impossibile / SOAR (dry-run)</h3>
+        <div id="travelIndicators">Nessun evento di viaggio impossibile.</div>
         <div id="soarStatus" style="margin-top: 12px; color: var(--muted);"></div>
       </div>
 
@@ -286,6 +416,10 @@
     </div>
 
     <script>
+      if (new URLSearchParams(window.location.search).get('workspace') === '1') {
+        document.body.classList.add('workspace-view');
+      }
+
       const statusBadge = document.getElementById('statusBadge');
       const statusText = document.getElementById('statusText');
       const processedLines = document.getElementById('processedLines');
@@ -303,34 +437,12 @@
         statusText.textContent = active ? 'tailer attivo' : 'tailer fermo/errore';
       }
 
-      const LOCAL_NETWORKS = [
-        { base: [10, 0, 0, 0], mask: 8 },
-        { base: [172, 16, 0, 0], mask: 12 },
-        { base: [192, 168, 0, 0], mask: 16 },
-        { base: [127, 0, 0, 0], mask: 8 },
-      ];
-
-      function isLocalAddress(value) {
-        const ip = String(value || '').trim();
-        const octets = ip.split('.').map(Number);
-        if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-        const valueNumber = octets.reduce((total, part) => (total * 256) + part, 0) >>> 0;
-        return LOCAL_NETWORKS.some(({ base, mask }) => {
-          const baseNumber = base.reduce((total, part) => (total * 256) + part, 0) >>> 0;
-          const networkMask = (0xffffffff << (32 - mask)) >>> 0;
-          return (valueNumber & networkMask) === (baseNumber & networkMask);
-        });
-      }
-
       function classifyLog(entry) {
-        const user = String(entry['user.name'] || '').trim();
-        const host = String(entry['host.hostname'] || '').trim();
-        const ip = String(entry['source.ip'] || (entry.ips || [])[0] || '').trim();
         const message = String(entry.message || entry.raw_line || entry.raw || '').toLowerCase();
         const failedLogin = entry['event.outcome'] === 'failure' || /failed password|failed publickey|authentication failure|invalid user|login failure/.test(message);
-        const parser = String(entry.matched_parser || entry.format || '').toLowerCase();
-        if (!user || !host || !ip || parser === 'unknown' || failedLogin) return { level: 'critical', label: 'critical' };
-        if (!isLocalAddress(ip)) return { level: 'warning', label: 'warning' };
+        if (failedLogin) return { level: 'critical', label: 'critical' };
+        if (entry.is_alert || (Array.isArray(entry.matching_rules) && entry.matching_rules.length > 0))
+          return { level: 'warning', label: 'warning' };
         return { level: 'neutral', label: 'neutral' };
       }
 
@@ -354,7 +466,7 @@
           .map((alert) => {
             const level = alert.level || 'warning';
             const icon = level === 'error' ? '⚠' : '•';
-            const blockButton = alert.source && alert.source !== 'unknown' ? `<button class=\"block-ip\" data-ip=\"${escapeHtml(alert.source)}\" type=\"button\">Blocca IP</button>` : '';
+            const blockButton = alert.source && alert.source !== 'unknown' ? `<button class=\"block-ip\" data-ip=\"${escapeHtml(alert.source)}\" type=\"button\">Simula blocco IP</button>` : '';
             return `
               <tr>
                 <td><span class="warning-pill">${icon}</span></td>
@@ -374,13 +486,22 @@
         const dependencies = data.dependencies || {};
         document.getElementById('dependencyStatus').textContent = Object.values(dependencies).every(Boolean) ? 'operativi' : 'degradati';
         const travel = (data.alerts || []).filter((alert) => alert.details && alert.details.distance_km);
-        document.getElementById('travelIndicators').innerHTML = travel.length ? travel.map((alert) => `<div class=\"card\"><strong>${escapeHtml(alert.source || 'IP sconosciuto')}</strong> - ${escapeHtml(alert.message)}<br><small>Distanza: ${escapeHtml(alert.details.distance_km)} km, velocità: ${escapeHtml(alert.details.speed_kmh)} km/h</small></div>`).join('') : 'Nessun evento impossible travel.';
+        document.getElementById('travelIndicators').innerHTML = travel.length ? travel.map((alert) => `<div class=\"card\"><strong>${escapeHtml(alert.source || 'IP sconosciuto')}</strong> - ${escapeHtml(alert.message)}<br><small>Distanza: ${escapeHtml(alert.details.distance_km)} km, velocità: ${escapeHtml(alert.details.speed_kmh)} km/h</small></div>`).join('') : 'Nessun evento di viaggio impossibile.';
       }
 
       function bindSoarButtons() {
         document.querySelectorAll('.block-ip').forEach((button) => {
           button.onclick = () => fetch('/api/soar/block-ip', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ip: button.dataset.ip}) })
-            .then((response) => { document.getElementById('soarStatus').textContent = response.ok ? 'Richiesta di blocco inviata.' : 'SOAR non configurato o richiesta rifiutata.'; });
+            .then(async (response) => {
+              if (!response.ok) throw new Error('SOAR request rejected');
+              const result = await response.json();
+              document.getElementById('soarStatus').textContent = result.status === 'dry-run'
+                ? 'SOAR dry-run: simulazione registrata; nessun blocco applicato.'
+                : 'Richiesta SOAR accettata.';
+            })
+            .catch(() => {
+              document.getElementById('soarStatus').textContent = 'SOAR non raggiungibile o richiesta rifiutata.';
+            });
         });
       }
 

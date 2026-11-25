@@ -32,4 +32,7 @@ geoip/
 *.pfx
 *.jks
 *.keystore
-\n# runtime secrets and local runtime state\n.sentinellogs/
+
+# runtime secrets and local runtime state
+.sentinellogs/
+/google-activity/

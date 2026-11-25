@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -13,6 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from time import monotonic
 from typing import Any
+
+from .network import validate_bind_host
 
 logger = logging.getLogger(__name__)
 
@@ -403,15 +406,21 @@ class MetricsHTTPHandler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 64 * 1024:
+                raise ValueError("invalid payload size")
             payload = json.loads(self.rfile.read(length))
-            ip_address = str(payload.get("ip", "")).strip()
-            if not ip_address:
+            if not isinstance(payload, dict):
+                raise ValueError("payload must be an object")
+            raw_ip = payload.get("ip")
+            if not isinstance(raw_ip, str):
                 raise ValueError("ip is required")
-            action(ip_address)
+            ip_address = ipaddress.ip_address(raw_ip.strip()).compressed
+            action_status = action(ip_address)
         except (ValueError, json.JSONDecodeError) as exc:
             self.send_error(400, str(exc))
             return
-        body = b'{"status":"accepted"}'
+        status = "dry-run" if action_status == "dry-run" else "accepted"
+        body = json.dumps({"status": status}).encode("utf-8")
         self.send_response(202)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -422,7 +431,16 @@ class MetricsHTTPHandler(BaseHTTPRequestHandler):
         logger.debug("Metrics HTTP request handled")
 
 
-def start_metrics_server(registry: MetricsRegistry, port: int, enable_dashboard: bool = True, soar_action: Any | None = None, ingest_callback: Any | None = None, host: str = "127.0.0.1") -> ThreadingHTTPServer:
+def start_metrics_server(
+    registry: MetricsRegistry,
+    port: int,
+    enable_dashboard: bool = True,
+    soar_action: Any | None = None,
+    ingest_callback: Any | None = None,
+    host: str = "127.0.0.1",
+    allow_wildcard: bool = False,
+) -> ThreadingHTTPServer:
+    host = validate_bind_host(host, allow_wildcard=allow_wildcard)
     basic_auth = MetricsHTTPHandler._resolve_basic_auth()
     server = ThreadingHTTPServer((host, port), MetricsHTTPHandler)
     server.registry = registry  # type: ignore[attr-defined]

@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
+from .google_activity import GoogleActivityWatcher
 from .tailer import LogTailer, journal_lines
 
 logger = logging.getLogger(__name__)
@@ -34,39 +36,32 @@ def _process_name(line: str) -> str:
     return match.group(1) if match else "unknown"
 
 
-def _local_ip() -> str:
-    try:
-        import psutil  # type: ignore
-        for addresses in psutil.net_if_addrs().values():
-            for address in addresses:
-                if address.family == socket.AF_INET and not address.address.startswith("127."):
-                    return address.address
-    except (ImportError, OSError):
-        pass
-    try:
-        for address in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            candidate = address[4][0]
-            if not candidate.startswith("127."):
-                return candidate
-    except OSError:
-        pass
-    return "127.0.0.1"
-
-
 def post_events(endpoint: str, agent_id: str, events: list[dict[str, Any]]) -> int:
     try:
         import requests  # type: ignore
     except ImportError as exc:
         raise RuntimeError("requests is required; run ./run-local-agent.sh to install dependencies") from exc
-    raw_auth = os.environ.get("SENTINELLOGS_BASIC_AUTH", "")
-    if ":" not in raw_auth or len(raw_auth.split(":", 1)[1]) < 24:
-        raise RuntimeError("Set SENTINELLOGS_BASIC_AUTH before sending events")
+    token = os.environ.get("SENTINELLOGS_INGEST_TOKEN", "").strip()
+    headers = {"Content-Type": "application/json", "X-Sentinel-Agent": agent_id}
+    if token:
+        if urlsplit(endpoint).scheme.lower() != "https":
+            raise RuntimeError("Bearer ingestion requires an HTTPS endpoint")
+        headers["Authorization"] = f"Bearer {token}"
+        auth = None
+        verify = os.environ.get("SENTINELLOGS_INGEST_CA_FILE") or True
+    else:
+        raw_auth = os.environ.get("SENTINELLOGS_BASIC_AUTH", "")
+        if ":" not in raw_auth or len(raw_auth.split(":", 1)[1]) < 24:
+            raise RuntimeError("Set SENTINELLOGS_BASIC_AUTH or SENTINELLOGS_INGEST_TOKEN before sending events")
+        auth = tuple(raw_auth.split(":", 1))
+        verify = True
     try:
         response = requests.post(
             endpoint.rstrip("/") + "/v1/ingest",
             json={"events": events},
-            headers={"Content-Type": "application/json", "X-Sentinel-Agent": agent_id},
-            auth=tuple(raw_auth.split(":", 1)),
+            headers=headers,
+            auth=auth,
+            verify=verify,
             timeout=10,
         )
         output = f"[{datetime.now(timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')}] [{'OK' if response.ok else 'ERR'} {response.status_code}] Event delivery"
@@ -88,15 +83,28 @@ def post_events(endpoint: str, agent_id: str, events: list[dict[str, Any]]) -> i
 class LocalLogAgent:
     """Forward real local authentication lines to the local ingestion endpoint."""
 
-    def __init__(self, paths: list[str | Path], endpoint: str = "http://localhost:9090", agent_id: str = "local-agent", hostname: str | None = None, username: str | None = None, source_ip: str | None = None, sender: Callable[[str, str, list[dict[str, Any]]], int] | None = None, from_start: bool = True) -> None:
+    def __init__(
+        self,
+        paths: list[str | Path],
+        endpoint: str = "http://localhost:9090",
+        agent_id: str = "local-agent",
+        hostname: str | None = None,
+        username: str | None = None,
+        source_ip: str | None = None,
+        sender: Callable[[str, str, list[dict[str, Any]]], int] | None = None,
+        from_start: bool = False,
+        google_activity_dir: str | Path | None = None,
+    ) -> None:
         self.paths = [Path(path) for path in paths if Path(path).is_file() and os.access(path, os.R_OK)]
         self.endpoint = endpoint
         self.agent_id = agent_id
         self.hostname = hostname or socket.gethostname()
         self.username = username or self._current_username()
-        self.source_ip = source_ip or _local_ip()
+        self.source_ip = source_ip
         self.sender = sender or post_events
         self.from_start = from_start
+        configured_google_dir = google_activity_dir or os.environ.get("SENTINELLOGS_GOOGLE_ACTIVITY_DIR") or "google-activity"
+        self.google_activity_dir = Path(configured_google_dir)
         _terminal("SentinelLogs agent started")
 
     @staticmethod
@@ -114,20 +122,25 @@ class LocalLogAgent:
         return "unknown"
 
     def forward_line(self, line: str, source: str) -> int:
-        return self.sender(self.endpoint, self.agent_id, [{
-                "source_type": "linux_auth",
-                "source": source,
-                "raw": line.rstrip("\r\n"),
-                "message": line.rstrip("\r\n"),
-                "process": _process_name(line),
-                "source.ip": self.source_ip,
-                "host.hostname": self.hostname,
-                "user.name": self.username,
-                "host": {"hostname": self.hostname},
-                "user": {"name": self.username},
-            }])
+        event = {
+            "source_type": "linux_auth",
+            "source": source,
+            "raw": line.rstrip("\r\n"),
+            "message": line.rstrip("\r\n"),
+            "process": _process_name(line),
+            "host.hostname": self.hostname,
+            "user.name": self.username,
+            "host": {"hostname": self.hostname},
+            "user": {"name": self.username},
+        }
+        if self.source_ip:
+            event["source.ip"] = self.source_ip
+        return self.sender(self.endpoint, self.agent_id, [event])
 
     def run(self) -> None:
+        if self.google_activity_dir is not None:
+            watcher_thread = Thread(target=self._run_google_activity_watcher, daemon=True, name="google-activity-watcher")
+            watcher_thread.start()
         if not self.paths:
             logger.warning("No readable auth.log/syslog found; trying journald. Run with sudo for complete authentication visibility.")
             try:
@@ -141,6 +154,19 @@ class LocalLogAgent:
             worker.start()
         for worker in workers:
             worker.join()
+
+    def _run_google_activity_watcher(self) -> None:
+        try:
+            watcher = GoogleActivityWatcher(
+                self.google_activity_dir,
+                self.endpoint,
+                self.agent_id,
+                self.sender,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Google activity watcher could not start (%s)", type(exc).__name__)
+            return
+        watcher.run()
 
     def _follow(self, path: Path) -> None:
         try:

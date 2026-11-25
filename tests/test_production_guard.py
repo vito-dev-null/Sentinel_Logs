@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sys
+from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from sentinellogs import cli
+from sentinellogs.audit import AuditLog
+from sentinellogs.metrics import MetricsRegistry
 
 
 def test_cli_requires_file_argument(monkeypatch):
@@ -45,6 +48,25 @@ def test_metrics_sources_includes_file_arg(tmp_path):
         pytest.fail(f"Unexpected exception during test: {e}")
 
 
+def test_dispatch_record_updates_audit_integrity_metric(tmp_path):
+    audit_log = AuditLog(tmp_path / "audit.jsonl")
+    metrics_registry = MetricsRegistry()
+    assert not metrics_registry.as_dict()["integrity_verified"]
+
+    cli.dispatch_record(
+        cli.LogRecord(format="syslog", message="accepted login", raw="accepted login"),
+        sinks=[],
+        output_handle=StringIO(),
+        redaction_patterns=None,
+        metrics_registry=metrics_registry,
+        alert_engine=None,
+        audit_log=audit_log,
+    )
+
+    assert audit_log.integrity_verified
+    assert metrics_registry.as_dict()["integrity_verified"]
+
+
 def test_record_from_json_preserves_source():
     record = cli._record_from_json_line(
         '{"format":"syslog","message":"Failed password","raw":"raw line","source":"/var/log/auth.log"}'
@@ -54,15 +76,29 @@ def test_record_from_json_preserves_source():
     assert record.source == "/var/log/auth.log"
 
 
-def test_security_alert_rules_cover_login_and_sudo():
+def test_security_alert_rules_exclude_routine_login_and_sudo_events():
     engine = cli.build_alert_engine()
 
     assert "ssh-failed-password" in engine.matching_rules(
         cli.LogRecord(format="syslog", message="Failed password for root from 203.0.113.5")
     )
-    assert "ssh-login-success" in engine.matching_rules(
+    assert "ssh-login-success" not in engine.matching_rules(
         cli.LogRecord(format="syslog", message="Accepted publickey for admin from 203.0.113.5")
     )
-    assert "sudo-privileged-command" in engine.matching_rules(
+    assert "sudo-privileged-command" not in engine.matching_rules(
         cli.LogRecord(format="syslog", message="sudo: admin : TTY=pts/0 ; COMMAND=/usr/bin/id")
+    )
+
+
+def test_fail2ban_alert_rule_only_matches_ban_actions():
+    engine = cli.build_alert_engine()
+
+    assert "fail2ban-ban-action" in engine.matching_rules(
+        cli.LogRecord(format="syslog", message="fail2ban.actions: Ban 203.0.113.9")
+    )
+    assert "fail2ban-ban-action" not in engine.matching_rules(
+        cli.LogRecord(format="syslog", message="fail2ban.actions: Found 203.0.113.9")
+    )
+    assert "fail2ban-ban-action" not in engine.matching_rules(
+        cli.LogRecord(format="syslog", message="fail2ban.actions: Unban 203.0.113.9")
     )

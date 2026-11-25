@@ -13,7 +13,13 @@ class AuditLog:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
+        self._empty_at_start = not self.path.exists() or self.path.stat().st_size == 0
+        self._integrity_verified = not self._empty_at_start and self.verify()
         self._previous_hash = self._read_last_hash()
+
+    @property
+    def integrity_verified(self) -> bool:
+        return self._integrity_verified
 
     def _read_last_hash(self) -> str:
         if not self.path.exists():
@@ -31,18 +37,25 @@ class AuditLog:
 
     def append(self, event: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
+            if not self._empty_at_start and not self._integrity_verified:
+                raise RuntimeError("Audit log integrity check failed; refusing to append")
             entry = {"previous_hash": self._previous_hash, "event": event}
             digest = hashlib.sha256(json.dumps(entry, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
             entry["hash"] = digest
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n")
             self._previous_hash = digest
+            if self._empty_at_start:
+                self._integrity_verified = self.verify()
+                self._empty_at_start = False
             return entry
 
     def verify(self) -> bool:
         previous = "0" * 64
         if not self.path.exists():
-            return True
+            return False
+        if self.path.stat().st_size == 0:
+            return False
         with self.path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 try:

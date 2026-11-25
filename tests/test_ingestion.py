@@ -1,8 +1,17 @@
 from pathlib import Path
 
 from sentinellogs.ingestion import ingest_events, send_events
+from sentinellogs.cli import _build_parser
 from sentinellogs.parsers import ParserRegistry
 from sentinellogs.local_agent import LocalLogAgent, _process_name
+
+
+def test_remote_ingestion_defaults_to_loopback() -> None:
+    args = _build_parser().parse_args(["--file", "/var/log/auth.log"])
+
+    assert args.ingestion_host == "127.0.0.1"
+    assert args.ingestion_port is None
+    assert args.allow_wildcard_bind is False
 
 
 def test_ingest_events_normalizes_multiple_source_types() -> None:
@@ -23,6 +32,48 @@ def test_ingest_events_normalizes_multiple_source_types() -> None:
     assert all(record.tenant_id == "acme" and record.agent_id == "agent-1" for record in received)
     assert received[0].event_outcome == "failure"
     assert received[1].source_type == "windows_eventlog_security"
+
+
+def test_structured_ingestion_extracts_peer_ips_from_message() -> None:
+    registry = ParserRegistry.from_config(Path("src/sentinellogs/patterns.yaml"))
+    received = []
+    message = "Unknown Tailscale peer ips=203.0.113.8,[2001:db8::8]"
+
+    ingest_events(
+        {"event": {"source_type": "generic", "message": message, "raw": message}},
+        tenant_id="acme",
+        agent_id="peer-monitor",
+        registry=registry,
+        on_record=received.append,
+    )
+
+    assert received[0].ips == ["203.0.113.8", "2001:db8::8"]
+    assert received[0].source_ip == "203.0.113.8"
+
+
+def test_local_agent_preserves_log_source_ip_for_ingestion(tmp_path: Path) -> None:
+    registry = ParserRegistry.from_config(Path("src/sentinellogs/patterns.yaml"))
+    sent = []
+    received = []
+    agent = LocalLogAgent(
+        [tmp_path / "missing.log"],
+        hostname="test-host",
+        username="test-user",
+        sender=lambda endpoint, agent_id, events: sent.extend(events) or 1,
+    )
+    line = "Aug 22 10:22:31 test-host sshd[1234]: Failed password for test-user from 203.0.113.9 port 22"
+
+    agent.forward_line(line, "auth.log")
+    assert "source.ip" not in sent[0]
+    ingest_events(
+        {"events": sent},
+        tenant_id="acme",
+        agent_id="agent-1",
+        registry=registry,
+        on_record=received.append,
+    )
+
+    assert received[0].source_ip == "203.0.113.9"
 
 
 def test_ingest_events_rejects_unknown_source_type() -> None:
@@ -75,6 +126,29 @@ def test_local_agent_can_disable_initial_replay(tmp_path: Path) -> None:
     assert agent.from_start is False
 
 
+def test_local_agent_defaults_to_new_lines_only(tmp_path: Path) -> None:
+    agent = LocalLogAgent([tmp_path / "missing.log"])
+    assert agent.from_start is False
+
+
+def test_local_agent_defaults_to_google_activity_folder(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SENTINELLOGS_GOOGLE_ACTIVITY_DIR", raising=False)
+
+    agent = LocalLogAgent([])
+
+    assert agent.google_activity_dir == Path("google-activity")
+
+
+def test_local_agent_uses_google_activity_directory_from_environment(monkeypatch, tmp_path: Path) -> None:
+    google_dir = tmp_path / "google-exports"
+    monkeypatch.setenv("SENTINELLOGS_GOOGLE_ACTIVITY_DIR", str(google_dir))
+
+    agent = LocalLogAgent([])
+
+    assert agent.google_activity_dir == google_dir
+
+
 def test_pam_event_maps_actor_and_target() -> None:
     registry = ParserRegistry.from_config(Path("src/sentinellogs/patterns.yaml"))
     received = []
@@ -118,6 +192,7 @@ def test_agent_prints_compact_http_status(monkeypatch, capsys) -> None:
     from sentinellogs.local_agent import post_events
 
     monkeypatch.setenv("SENTINELLOGS_BASIC_AUTH", "test-user:a-strong-test-password-1234")
+    monkeypatch.delenv("SENTINELLOGS_INGEST_TOKEN", raising=False)
     post_events("http://localhost:9090", "local-agent", [{
         "message": "pam_unix(sudo:session): session opened for user root by test-user",
         "source.ip": "203.0.113.10",
@@ -134,10 +209,59 @@ def test_agent_prints_compact_http_status(monkeypatch, capsys) -> None:
     assert "pam_unix" not in output
 
 
+def test_agent_uses_bearer_token_and_pinned_ca_for_https(monkeypatch, tmp_path: Path) -> None:
+    import requests
+    request_options = {}
+
+    class Response:
+        status_code = 202
+        ok = True
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"accepted": 1}
+
+    def fake_post(*args, **kwargs):
+        request_options.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setenv("SENTINELLOGS_INGEST_TOKEN", "agent-secret")
+    monkeypatch.setenv("SENTINELLOGS_INGEST_CA_FILE", str(tmp_path / "agent-client.crt"))
+
+    from sentinellogs.local_agent import post_events
+
+    post_events("https://collector.example.internal:9443", "node-1", [{"message": "real event"}])
+
+    assert request_options["headers"]["Authorization"] == "Bearer agent-secret"
+    assert request_options["headers"]["X-Sentinel-Agent"] == "node-1"
+    assert request_options["verify"] == str(tmp_path / "agent-client.crt")
+    assert request_options["auth"] is None
+
+
+def test_agent_refuses_bearer_token_over_http(monkeypatch) -> None:
+    import requests
+
+    monkeypatch.setenv("SENTINELLOGS_INGEST_TOKEN", "agent-secret")
+    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("request must not be sent")))
+
+    from sentinellogs.local_agent import post_events
+
+    try:
+        post_events("http://collector.example.internal:9443", "node-1", [{"message": "event"}])
+    except RuntimeError as exc:
+        assert "HTTPS" in str(exc)
+    else:
+        raise AssertionError("Bearer token was sent over HTTP")
+
+
 def test_local_agent_refuses_to_send_without_auth(monkeypatch) -> None:
     import requests
 
     monkeypatch.delenv("SENTINELLOGS_BASIC_AUTH", raising=False)
+    monkeypatch.delenv("SENTINELLOGS_INGEST_TOKEN", raising=False)
     monkeypatch.setattr(requests, "post", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("request must not be sent")))
 
     from sentinellogs.local_agent import post_events

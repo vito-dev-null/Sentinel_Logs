@@ -59,8 +59,13 @@ class FileSink(BaseSink):
         if self.path.exists() and self.path.stat().st_size >= self.max_file_size_bytes:
             logger.info("Rotating output file due to size limit %s bytes", self.max_file_size_bytes)
             rotated = self.path.with_name(f"{self.path.stem}.1{self.path.suffix}")
+            max_rotated_files = (
+                self.max_files - 1
+                if self.max_files is not None and self.max_files > 0
+                else 10
+            )
             if rotated.exists():
-                for idx in range(9, 0, -1):
+                for idx in range(max_rotated_files - 1, 0, -1):
                     previous = self.path.with_name(f"{self.path.stem}.{idx}{self.path.suffix}")
                     next_path = self.path.with_name(f"{self.path.stem}.{idx + 1}{self.path.suffix}")
                     if previous.exists():

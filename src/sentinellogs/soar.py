@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import ipaddress
+import logging
 from dataclasses import dataclass
 from typing import Callable
 
 from .detection import SecurityAlert
+
+logger = logging.getLogger(__name__)
+
+
+def dry_run_block_ip(ip_address: str) -> str:
+    ipaddress.ip_address(ip_address)
+    logger.info("SOAR dry-run request accepted; no firewall changes made")
+    return "dry-run"
 
 
 @dataclass(frozen=True)

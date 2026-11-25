@@ -27,6 +27,23 @@ def test_file_sink_writes_json(tmp_path: Path) -> None:
     assert '"message":"started"' in contents
 
 
+def test_file_sink_respects_max_files_above_ten(tmp_path: Path) -> None:
+    path = tmp_path / "out.jsonl"
+    sink = FileSink(path, max_file_size_bytes=1, max_files=12)
+    try:
+        for index in range(25):
+            sink.emit(LogRecord(format="app", message=f"entry-{index}"))
+    finally:
+        sink.close()
+
+    files = list(tmp_path.glob("out*.jsonl"))
+    contents = "\n".join(file.read_text(encoding="utf-8") for file in files)
+    assert len(files) == 12
+    assert "entry-13" in contents
+    assert "entry-12" not in contents
+    assert "entry-24" in contents
+
+
 def test_webhook_sink_retries_and_posts() -> None:
     record = LogRecord(format='syslog', message='Failed password', level='ERROR', parsed_at='2026-01-01T00:00:00Z')
     fake_response = MagicMock()

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from sentinellogs.parsers import AppLogParser, ParserRegistry, SyslogParser, normalize_timestamp_to_iso
+from sentinellogs.parsers import AppLogParser, ParserRegistry, SyslogParser, extract_ips, normalize_timestamp_to_iso
 
 
 @pytest.fixture
@@ -79,6 +79,12 @@ def test_ip_extraction_absent() -> None:
 
     assert record is not None
     assert record.ips == []
+
+
+def test_ip_extraction_validates_ipv4_and_supports_ipv6() -> None:
+    message = "peer ips=203.0.113.7:41641,[2001:db8::7]:41641 invalid=999.999.999.999"
+
+    assert extract_ips(message) == ["203.0.113.7", "2001:db8::7"]
 
 
 def test_registry_selects_correct_parser() -> None:

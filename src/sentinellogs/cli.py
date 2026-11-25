@@ -24,6 +24,8 @@ from .schema import LogRecord, normalize_security_record
 from .sinks import AlertEngine, BaseSink, create_sink
 from .tailer import LogTailer, journal_lines
 from .bootstrap import ensure_local_secrets
+from .soar import dry_run_block_ip
+from .network import validate_bind_host
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +135,8 @@ def dispatch_record(
 
     if audit_log is not None:
         audit_entry = audit_log.append(record.to_dict())
+        if metrics_registry is not None:
+            metrics_registry.set_integrity_status(audit_log.integrity_verified)
         if event_store is not None:
             event_store.save_audit(audit_entry)
     if event_store is not None:
@@ -272,7 +276,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--patterns", help="Path to a YAML/JSON parser pattern file. Defaults to the bundled patterns.")
     parser.add_argument("--alert-config", help="Path to a YAML alert-rules file.")
     parser.add_argument("--metrics-port", type=int, default=None, help="Expose /metrics, /health, and the dashboard on this port.")
-    parser.add_argument("--metrics-host", default="127.0.0.1", help="Metrics bind address; use 0.0.0.0 only behind a trusted TLS proxy.")
+    parser.add_argument("--metrics-host", default="127.0.0.1", help="Explicit address or hostname for metrics; defaults to loopback.")
     parser.add_argument(
         "--dashboard",
         action=argparse.BooleanOptionalAction,
@@ -287,6 +291,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-type", default="linux_auth", help="Source type: linux_auth, journald, Windows, cloud, or network.")
     parser.add_argument("--audit-log", help="Append accepted events to a tamper-evident hash-chain JSONL file.")
     parser.add_argument("--admin-user", action="append", default=[], help="Administrator allowed to use sudo. Repeatable.")
+    parser.add_argument("--ingestion-host", default="127.0.0.1", help="Explicit address or hostname for HTTPS ingestion; defaults to loopback.")
+    parser.add_argument(
+        "--allow-wildcard-bind",
+        action="store_true",
+        help="Explicitly allow listeners on all interfaces; use only with an enforced network boundary.",
+    )
     parser.add_argument("--ingestion-port", type=int, default=None, help="Enable the HTTPS remote ingestion listener.")
     parser.add_argument("--ingestion-certfile", help="TLS certificate for the ingestion listener.")
     parser.add_argument("--ingestion-keyfile", help="TLS private key for the ingestion listener.")
@@ -344,6 +354,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.file:
         parser.error("No log file specified. Use --file <path> to select the file to monitor.")
 
+    try:
+        if args.metrics_port is not None:
+            validate_bind_host(args.metrics_host, allow_wildcard=args.allow_wildcard_bind)
+        if args.ingestion_port is not None:
+            validate_bind_host(args.ingestion_host, allow_wildcard=args.allow_wildcard_bind)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     configure_logging(args.log_level)
 
     metrics_registry = MetricsRegistry()
@@ -354,7 +372,14 @@ def main(argv: list[str] | None = None) -> int:
     worker_thread: Thread | None = None
     metrics_registry.set_sources(args.file if args.file else [])
     if args.metrics_port is not None:
-        metrics_server = start_metrics_server(metrics_registry, args.metrics_port, enable_dashboard=args.dashboard, host=args.metrics_host)
+        metrics_server = start_metrics_server(
+            metrics_registry,
+            args.metrics_port,
+            enable_dashboard=args.dashboard,
+            soar_action=dry_run_block_ip,
+            host=args.metrics_host,
+            allow_wildcard=args.allow_wildcard_bind,
+        )
     metrics_registry.set_tailer_active(True)
 
     sink_specs = _build_sink_specs(args)
@@ -387,8 +412,20 @@ def main(argv: list[str] | None = None) -> int:
             parse_timeout_ms=args.parse_timeout_ms,
         )
         alert_engine = build_alert_engine(Path(args.alert_config) if args.alert_config else None)
-        correlation_engine = CorrelationEngine(admin_users=set(args.admin_user))
+        trusted_login_cidrs = [
+            item.strip()
+            for item in os.environ.get("SENTINELLOGS_TRUSTED_LOGIN_CIDRS", "").split(",")
+            if item.strip()
+        ]
+        correlation_engine = CorrelationEngine(
+            admin_users=set(args.admin_user),
+            trusted_login_cidrs=trusted_login_cidrs,
+        )
         audit_log = AuditLog(args.audit_log) if args.audit_log else None
+        if audit_log is not None:
+            metrics_registry.set_integrity_status(audit_log.integrity_verified)
+            if not audit_log.integrity_verified:
+                logger.warning("Audit log is empty or its integrity check failed")
         event_store = create_store()
         metrics_registry.set_dependency("postgres", os.environ.get("STORAGE_BACKEND", "jsonl").lower() == "jsonl" or event_store.__class__.__name__ == "PostgresStore")
         if os.environ.get("QUEUE_BACKEND", "off").lower() == "redis":
@@ -402,10 +439,12 @@ def main(argv: list[str] | None = None) -> int:
             ingestion_server = start_ingestion_server(
                 registry,
                 lambda record: redis_queue.publish(record) if redis_queue is not None else dispatch_record(record, sinks=sinks, output_handle=output_handle, redaction_patterns=args.redact, metrics_registry=metrics_registry, alert_engine=alert_engine, source="remote-ingestion", correlation_engine=correlation_engine, audit_log=audit_log, event_store=event_store),
+                host=args.ingestion_host,
                 port=args.ingestion_port,
                 tenant_tokens=tenant_tokens,
                 certfile=args.ingestion_certfile,
                 keyfile=args.ingestion_keyfile,
+                allow_wildcard=args.allow_wildcard_bind,
             )
             if redis_queue is not None:
                 worker_thread = Thread(target=redis_queue.consume, args=(lambda record: dispatch_record(record, sinks=sinks, output_handle=output_handle, redaction_patterns=args.redact, metrics_registry=metrics_registry, alert_engine=alert_engine, source="redis-worker", correlation_engine=correlation_engine, audit_log=audit_log, event_store=event_store),), daemon=True)
